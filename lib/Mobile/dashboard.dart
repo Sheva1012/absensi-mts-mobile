@@ -7,24 +7,24 @@ final _supabase = Supabase.instance.client;
 
 class TeacherProfile {
   final String nama;
+  final String? avatarUrl;
   final Map<String, List<String>> kelasDiampu;
 
-  TeacherProfile({required this.nama, required this.kelasDiampu});
+  TeacherProfile({
+    required this.nama,
+    required this.kelasDiampu,
+    this.avatarUrl,
+  });
 
-  // PERBAIKAN: Membuat factory lebih tangguh terhadap data yang salah format
   factory TeacherProfile.fromSupabase(Map<String, dynamic> data) {
     final kelasData = data['kelas_diampu'];
-    final Map<String, List<String>> kelasDiampuTyped =
-        {};
+    final Map<String, List<String>> kelasDiampuTyped = {};
 
-    // Cek jika data adalah Map sebelum diproses
     if (kelasData is Map<String, dynamic>) {
       kelasData.forEach((key, value) {
-        // Untuk setiap entri, cek jika nilainya adalah List
         if (value is List) {
           kelasDiampuTyped[key] = value.map((item) => item.toString()).toList();
         } else {
-          // Cetak peringatan jika format data salah, agar mudah di-debug
           print(
             "Peringatan: Data untuk '$key' di 'kelas_diampu' bukan List, melainkan ${value.runtimeType}. Entri ini dilewati.",
           );
@@ -34,8 +34,8 @@ class TeacherProfile {
 
     return TeacherProfile(
       nama: data['nama'] ?? 'Nama Guru',
-      kelasDiampu:
-          kelasDiampuTyped,
+      avatarUrl: data['avatar_url'], // ambil URL langsung dari Supabase Storage
+      kelasDiampu: kelasDiampuTyped,
     );
   }
 }
@@ -238,7 +238,18 @@ class _AppSidebarState extends State<AppSidebar> {
               ),
               child: Row(
                 children: [
-                  const CircleAvatar(backgroundColor: Color(0xFFE0E0E0)),
+                  CircleAvatar(
+                    radius: 24,
+                    backgroundColor: const Color(0xFFE0E0E0),
+                    backgroundImage:
+                        (widget.teacherProfile.avatarUrl != null &&
+                            widget.teacherProfile.avatarUrl!.isNotEmpty)
+                        ? NetworkImage(widget.teacherProfile.avatarUrl!)
+                        : const NetworkImage(
+                            'https://eachbhkjgadrpmrpbwat.supabase.co/storage/v1/object/public/avatars/default.png',
+                          ),
+                  ),
+
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(

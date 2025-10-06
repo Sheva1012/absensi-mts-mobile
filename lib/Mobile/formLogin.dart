@@ -160,13 +160,6 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                             ),
                             const SizedBox(height: 12),
-                            // Row(
-                            //   children: [
-                            //     Checkbox(value: false, onChanged: (val) {}),
-                            //     const Text("Remember me"),
-                            //   ],
-                            // ),
-                            const SizedBox(height: 12),
                             SizedBox(
                               width: double.infinity,
                               child: ElevatedButton(

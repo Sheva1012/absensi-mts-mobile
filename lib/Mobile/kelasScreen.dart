@@ -10,17 +10,28 @@ import 'package:app_absensi_mts/Mobile/editSiswa.dart';
 class Absensi {
   final String status;
   final String? keterangan;
-  final String? suratUrl;
   final String? tanggal;
+  final String? fileUrlSurat;
+  final String? jenisSurat;
+  final String? statusVerifikasi;
 
-  Absensi({required this.status, this.keterangan, this.suratUrl, this.tanggal});
+  Absensi({
+    required this.status,
+    this.keterangan,
+    this.tanggal,
+    this.fileUrlSurat,
+    this.jenisSurat,
+    this.statusVerifikasi,
+  });
 
   factory Absensi.fromJson(Map<String, dynamic> json) {
     return Absensi(
       status: json['status'] ?? 'alpha',
       keterangan: json['keterangan'],
-      suratUrl: json['surat_url'],
       tanggal: json['tanggal'],
+      fileUrlSurat: json['surat']?['file_url'],
+      jenisSurat: json['surat']?['jenis'],
+      statusVerifikasi: json['surat']?['status_verifikasi'],
     );
   }
 }
@@ -29,8 +40,8 @@ class Siswa {
   final int id;
   final int no;
   final String nama;
-  final String status; // status_siswa (aktif / nonaktif)
-  final Absensi absensiHariIni; // tidak nullable agar selalu ada nilai default
+  final String status;
+  final Absensi absensiHariIni;
 
   Siswa({
     required this.id,
@@ -44,13 +55,11 @@ class Siswa {
     final absensiList = json['absensi'] as List<dynamic>? ?? [];
     final today = DateTime.now().toIso8601String().split('T').first;
 
-    // cari absensi hari ini
     final absensiToday = absensiList.cast<Map<String, dynamic>?>().firstWhere(
       (a) => a?['tanggal'] == today,
       orElse: () => null,
     );
 
-    // kalau belum absen, default alpha
     final absensi = (absensiToday != null)
         ? Absensi.fromJson(absensiToday)
         : Absensi(status: 'alpha');
@@ -104,21 +113,20 @@ class _KelasScreenState extends State<KelasScreen> {
     super.dispose();
   }
 
-  /// Filter pencarian lokal
   void _filterSiswa() {
     final query = _searchController.text.toLowerCase();
     setState(() {
       if (query.isEmpty) {
         _filteredSiswaList = _originalSiswaList;
       } else {
-        _filteredSiswaList = _originalSiswaList.where((siswa) {
-          return siswa.nama.toLowerCase().contains(query);
-        }).toList();
+        _filteredSiswaList = _originalSiswaList
+            .where((siswa) => siswa.nama.toLowerCase().contains(query))
+            .toList();
       }
     });
   }
 
-  /// Ambil semua siswa dan absensi hari ini
+  /// ✅ Ambil semua siswa, absensi, dan surat via nested join
   Future<void> _fetchData() async {
     setState(() {
       _isLoading = true;
@@ -126,7 +134,7 @@ class _KelasScreenState extends State<KelasScreen> {
     });
 
     try {
-      // cari kelas_id
+      // Ambil ID kelas
       final kelasResponse = await _supabase
           .from('kelas')
           .select('id')
@@ -134,19 +142,21 @@ class _KelasScreenState extends State<KelasScreen> {
           .maybeSingle();
 
       if (kelasResponse == null || kelasResponse['id'] == null) {
-        throw Exception(
-          "Kelas '${widget.namaKelas}' tidak ditemukan di database.",
-        );
+        throw Exception("Kelas '${widget.namaKelas}' tidak ditemukan di database.");
       }
 
       final kelasId = kelasResponse['id'];
 
-      // ambil semua siswa di kelas + relasi absensi (tanpa filter tanggal)
+      // Query nested join (Supabase otomatis kenali FK)
       final data = await _supabase
           .from('siswa')
-          .select(
-            'id, no, nama, status, absensi(status, keterangan, surat_url, tanggal)',
-          )
+          .select('''
+            id, no, nama, status,
+            absensi (
+              status, keterangan, tanggal,
+              surat (file_url, jenis, status_verifikasi)
+            )
+          ''')
           .eq('kelas_id', kelasId)
           .order('no', ascending: true);
 
@@ -160,9 +170,9 @@ class _KelasScreenState extends State<KelasScreen> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(
-        () => _errorMessage = e.toString().replaceFirst("Exception: ", ""),
-      );
+      setState(() {
+        _errorMessage = e.toString().replaceFirst("Exception: ", "");
+      });
     } finally {
       if (!mounted) return;
       setState(() => _isLoading = false);
@@ -174,7 +184,6 @@ class _KelasScreenState extends State<KelasScreen> {
     await _fetchData();
   }
 
-  /// Navigasi ke halaman edit
   void _navigateToEdit(Siswa siswa) {
     final today = DateTime.now();
     Navigator.push(
@@ -185,8 +194,8 @@ class _KelasScreenState extends State<KelasScreen> {
           no: siswa.no.toString(),
           nama: siswa.nama,
           tanggal: today,
-          suratUrl: siswa.absensiHariIni.suratUrl,
           status: siswa.absensiHariIni.status,
+          suratUrl: siswa.absensiHariIni.fileUrlSurat,
         ),
       ),
     ).then((isSuccess) {
@@ -263,10 +272,8 @@ class _KelasScreenState extends State<KelasScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Text(
-                  "😢 Gagal Memuat Data",
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                ),
+                const Text("😢 Gagal Memuat Data",
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 const SizedBox(height: 8),
                 Text(_errorMessage!, textAlign: TextAlign.center),
                 const SizedBox(height: 16),
@@ -389,10 +396,8 @@ class _KelasScreenState extends State<KelasScreen> {
             },
           ),
           const SizedBox(height: 6),
-          const Text(
-            "MTS Sunan Gunung Jati",
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-          ),
+          const Text("MTS Sunan Gunung Jati",
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         ],
       ),
     );

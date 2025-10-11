@@ -4,20 +4,18 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class EditSiswaScreen extends StatefulWidget {
-  final int siswaId;
+  final int id;
   final String no;
   final String nama;
-  final DateTime tanggal;
-  final String? status;
+  final String? keterangan;
   final String? suratUrl;
 
   const EditSiswaScreen({
     super.key,
-    required this.siswaId,
+    required this.id,
     required this.no,
     required this.nama,
-    required this.tanggal,
-    this.status,
+    this.keterangan,
     this.suratUrl,
   });
 
@@ -30,15 +28,14 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
   final _supabase = Supabase.instance.client;
   final picker = ImagePicker();
 
-  String? selectedStatus;
+  String? selectedKeterangan;
   File? selectedFile;
   bool isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    // enum PostgreSQL lowercase
-    selectedStatus = widget.status?.toLowerCase() ?? 'hadir';
+    selectedKeterangan = widget.keterangan ?? 'Hadir';
   }
 
   Future<void> _pickFile(ImageSource source) async {
@@ -53,25 +50,32 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
     setState(() => isLoading = true);
 
     try {
-      final tanggalOnly = widget.tanggal.toIso8601String().split('T').first;
+      final tanggalOnly = DateTime.now().toIso8601String().split('T').first;
 
-      final Map<String, dynamic> dataToSave = {
-        'siswa_id': widget.siswaId,
+      // === 1. PROSES TABEL ABSENSI ===
+      // Siapkan data untuk di-upsert ke tabel 'absensi'
+      final Map<String, dynamic> absensiData = {
+        'siswa_id': widget.id,
         'tanggal': tanggalOnly,
-        'status': selectedStatus,
+        'keterangan': selectedKeterangan,
         'updated_at': DateTime.now().toIso8601String(),
       };
 
-      final bool needsFileUpload =
-          selectedStatus == 'sakit' || selectedStatus == 'izin';
+      // Gunakan upsert: jika data sudah ada, update. Jika tidak, insert.
+      await _supabase.from('absensi').upsert(absensiData);
 
-      // === Upload / hapus surat ===
-      if (needsFileUpload) {
+      // === 2. PROSES TABEL SURAT ===
+      final bool needsSurat =
+          selectedKeterangan == 'Sakit' || selectedKeterangan == 'Izin';
+
+      if (needsSurat) {
+        // Jika statusnya Sakit/Izin dan ada file baru yang dipilih
         if (selectedFile != null) {
           final ext = selectedFile!.path.split('.').last;
-          final fileName = '${widget.siswaId}_$tanggalOnly.$ext';
-          final filePath = 'absensi/${widget.siswaId}/$fileName';
+          final fileName = '${widget.id}_$tanggalOnly.$ext';
+          final filePath = 'surat_izin/${widget.id}/$fileName';
 
+          // Upload file baru (menimpa yang lama jika ada)
           await _supabase.storage.from('surat_keterangan').upload(
                 filePath,
                 selectedFile!,
@@ -80,47 +84,20 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
 
           final fileUrl =
               _supabase.storage.from('surat_keterangan').getPublicUrl(filePath);
-          dataToSave['surat_url'] = fileUrl;
-        } else {
-          dataToSave['surat_url'] = widget.suratUrl;
+              
+          // Upsert data ke tabel 'surat'
+          await _supabase.from('surat').upsert({
+            'siswa_id': widget.id,
+            'tanggal': tanggalOnly,
+            'file_url': fileUrl,
+            'updated_at': DateTime.now().toIso8601String(),
+          });
         }
       } else {
-        // hadir / alpha / terlambat
-        dataToSave['surat_url'] = null;
-        dataToSave['keterangan'] = null;
-      }
-
-      // === cek apakah absensi sudah ada ===
-      final existing = await _supabase
-          .from('absensi')
-          .select('id')
-          .eq('siswa_id', widget.siswaId)
-          .eq('tanggal', tanggalOnly)
-          .maybeSingle();
-
-      if (existing == null) {
-        // belum ada → insert baru
-        await _supabase.from('absensi').insert(dataToSave);
-      } else {
-        // sudah ada → update
-        await _supabase
-            .from('absensi')
-            .update(dataToSave)
-            .eq('siswa_id', widget.siswaId)
-            .eq('tanggal', tanggalOnly);
-      }
-
-      // ambil ulang data terbaru dari Supabase agar form ikut berubah
-      final updated = await _supabase
-          .from('absensi')
-          .select('status, surat_url')
-          .eq('siswa_id', widget.siswaId)
-          .eq('tanggal', tanggalOnly)
-          .maybeSingle();
-
-      if (updated != null) {
-        setState(() {
-          selectedStatus = updated['status'];
+        // Jika statusnya Hadir/Alfa, hapus data surat yang mungkin ada
+        await _supabase.from('surat').delete().match({
+          'siswa_id': widget.id,
+          'tanggal': tanggalOnly,
         });
       }
 
@@ -130,13 +107,12 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
         backgroundColor: Colors.green,
       ));
 
-      // kirim sinyal ke halaman sebelumnya untuk refresh
       Navigator.pop(context, true);
     } catch (e) {
       debugPrint('❌ ERROR saat simpan absensi: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('❌ Gagal menyimpan absensi: $e'),
+          content: Text('❌ Gagal menyimpan absensi: ${e.toString()}'),
           backgroundColor: Colors.red,
         ));
       }
@@ -148,7 +124,7 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
   @override
   Widget build(BuildContext context) {
     final bool isUploadEnabled =
-        selectedStatus == 'sakit' || selectedStatus == 'izin';
+        selectedKeterangan == 'Sakit' || selectedKeterangan == 'Izin';
 
     return Scaffold(
       appBar: AppBar(title: const Text('Validasi Absensi Siswa'), centerTitle: true),
@@ -161,23 +137,20 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
             const SizedBox(height: 20),
             _buildReadOnlyField('Nama Siswa', widget.nama),
             const SizedBox(height: 20),
-            _buildReadOnlyField(
-                'Tanggal', widget.tanggal.toIso8601String().split('T').first),
-            const SizedBox(height: 20),
-            const Text('Status Kehadiran'),
+            
+            const Text('Keterangan'),
             DropdownButtonFormField<String>(
-              value: selectedStatus,
+              value: selectedKeterangan,
               items: const [
-                DropdownMenuItem(value: 'hadir', child: Text('Hadir')),
-                DropdownMenuItem(value: 'sakit', child: Text('Sakit')),
-                DropdownMenuItem(value: 'izin', child: Text('Izin')),
-                DropdownMenuItem(value: 'alpha', child: Text('Alpha')),
-                DropdownMenuItem(value: 'terlambat', child: Text('Terlambat')),
+                DropdownMenuItem(value: 'Hadir', child: Text('Hadir')),
+                DropdownMenuItem(value: 'Sakit', child: Text('Sakit')),
+                DropdownMenuItem(value: 'Izin', child: Text('Izin')),
+                DropdownMenuItem(value: 'Alfa', child: Text('Alfa')),
               ],
               onChanged: (val) {
                 setState(() {
-                  selectedStatus = val;
-                  if (val == 'hadir' || val == 'alpha' || val == 'terlambat') {
+                  selectedKeterangan = val;
+                  if (val == 'Hadir' || val == 'Alfa') {
                     selectedFile = null;
                   }
                 });
@@ -187,20 +160,22 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
             ),
             const SizedBox(height: 20),
 
-            // === preview surat lama ===
-            if (widget.suratUrl != null && widget.suratUrl!.isNotEmpty)
+            // Tampilkan preview surat yang sudah ada JIKA belum ada file baru yang dipilih
+            if (widget.suratUrl != null && selectedFile == null)
               Column(children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: Image.network(
                     widget.suratUrl!,
                     height: 180,
+                    width: double.infinity,
                     fit: BoxFit.cover,
                     errorBuilder: (c, e, s) => Container(
                       height: 150,
+                      width: double.infinity,
                       color: Colors.grey.shade200,
                       child:
-                          const Center(child: Text('Gambar surat tidak tersedia')),
+                          const Center(child: Text('Gagal memuat gambar surat')),
                     ),
                   ),
                 ),
@@ -233,7 +208,7 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
                         ? 'Pilih file dari galeri'
                         : selectedFile!.path.split('/').last,
                     style: TextStyle(
-                        color: isUploadEnabled ? Colors.black : Colors.grey),
+                        color: isUploadEnabled ? Colors.black : Colors.grey[600]),
                   ),
                 ),
               ),
@@ -305,3 +280,4 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
     ]);
   }
 }
+

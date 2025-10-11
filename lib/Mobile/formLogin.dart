@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'auth.dart'; // Import wrapper
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -36,14 +37,23 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
+      // Tugas LoginScreen sekarang hanya otentikasi
       await _supabase.auth.signInWithPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
+
+      if (mounted) {
+        // Setelah berhasil, arahkan ke AuthWrapper untuk pengecekan peran
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const AuthWrapper()),
+        );
+      }
     } on AuthException catch (e) {
       _showErrorSnackbar(e.message);
     } catch (e) {
-      _showErrorSnackbar('Terjadi kesalahan yang tidak diketahui.');
+      _showErrorSnackbar('Terjadi kesalahan: ${e.toString()}');
     } finally {
       if (mounted) {
         setState(() {
@@ -65,16 +75,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Variabel untuk mengecek apakah keyboard sedang tampil atau tidak.
-    // Jika > 0, berarti keyboard muncul.
     final isKeyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
-
     return Scaffold(
       resizeToAvoidBottomInset: true,
       body: SafeArea(
         child: Column(
           children: [
-            // ================= BAGIAN HEADER (TETAP DI ATAS) =================
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 60),
@@ -102,14 +108,12 @@ class _LoginScreenState extends State<LoginScreen> {
                 ],
               ),
             ),
-
-            // ================= BAGIAN KONTEN/FORM (BISA SCROLL) =================
             Expanded(
               child: SingleChildScrollView(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 24,
-                    vertical: 110,
+                    vertical: 40,
                   ),
                   child: Card(
                     elevation: 4,
@@ -159,7 +163,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 12),
+                            const SizedBox(height: 24),
                             SizedBox(
                               width: double.infinity,
                               child: ElevatedButton(
@@ -199,8 +203,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
             ),
-
-            // ================= BAGIAN FOOTER =================
             if (!isKeyboardVisible)
               Padding(
                 padding: const EdgeInsets.only(bottom: 32.0),
@@ -224,3 +226,4 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
+

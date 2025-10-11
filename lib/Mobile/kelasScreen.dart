@@ -1,66 +1,71 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:app_absensi_mts/Mobile/editSiswa.dart';
+import 'editSiswa.dart'; // Pastikan path ini benar
 
 /// =======================
-/// MODEL DATA
+/// MODEL DATA (DIPERBARUI)
 /// =======================
 
+// Model ini sekarang hanya fokus pada data dari tabel 'absensi'
 class Absensi {
-  final String status;
-  final String? keterangan;
-  final String? suratUrl;
+  final String status; // 'Hadir', 'Sakit', 'Izin', 'Alfa'
   final String? tanggal;
 
-  Absensi({required this.status, this.keterangan, this.suratUrl, this.tanggal});
-
-  factory Absensi.fromJson(Map<String, dynamic> json) {
-    return Absensi(
-      status: json['status'] ?? 'alpha',
-      keterangan: json['keterangan'],
-      suratUrl: json['surat_url'],
-      tanggal: json['tanggal'],
-    );
-  }
+  Absensi({required this.status, this.tanggal});
 }
 
 class Siswa {
   final int id;
   final int no;
   final String nama;
-  final String status; // status_siswa (aktif / nonaktif)
-  final Absensi absensiHariIni; // tidak nullable agar selalu ada nilai default
+  final String statusSiswa; // status_siswa (aktif / nonaktif)
+  final Absensi absensiHariIni;
+  final String? suratUrlHariIni; // URL surat sekarang disimpan di sini
 
   Siswa({
     required this.id,
     required this.no,
     required this.nama,
-    required this.status,
+    required this.statusSiswa,
     required this.absensiHariIni,
+    this.suratUrlHariIni,
   });
 
+  // Factory ini diperbarui untuk memproses relasi 'absensi' dan 'surat'
   factory Siswa.fromJson(Map<String, dynamic> json) {
     final absensiList = json['absensi'] as List<dynamic>? ?? [];
+    final suratList =
+        json['surat'] as List<dynamic>? ?? []; // Ambil data dari relasi 'surat'
     final today = DateTime.now().toIso8601String().split('T').first;
 
-    // cari absensi hari ini
-    final absensiToday = absensiList.cast<Map<String, dynamic>?>().firstWhere(
-      (a) => a?['tanggal'] == today,
+    // Cari absensi hari ini dari relasi 'absensi'
+    final absensiTodayMap = absensiList
+        .cast<Map<String, dynamic>?>()
+        .firstWhere((a) => a?['tanggal'] == today, orElse: () => null);
+
+    // Cari surat hari ini dari relasi 'surat'
+    final suratTodayMap = suratList.cast<Map<String, dynamic>?>().firstWhere(
+      (s) => s?['tanggal'] == today,
       orElse: () => null,
     );
 
-    // kalau belum absen, default alpha
-    final absensi = (absensiToday != null)
-        ? Absensi.fromJson(absensiToday)
-        : Absensi(status: 'alpha');
+    // Tentukan status absensi. Default-nya 'Alfa' jika tidak ada data.
+    final absensi = Absensi(
+      status: absensiTodayMap?['keterangan'] ?? 'Alfa',
+      tanggal: absensiTodayMap?['tanggal'],
+    );
+
+    // Ambil URL surat jika ada
+    final suratUrl = suratTodayMap?['file_url'] as String?;
 
     return Siswa(
       id: json['id'] ?? 0,
       no: json['no'] ?? 0,
       nama: json['nama'] ?? 'Tanpa Nama',
-      status: json['status'] ?? 'aktif',
+      statusSiswa: json['status'] ?? 'aktif',
       absensiHariIni: absensi,
+      suratUrlHariIni: suratUrl,
     );
   }
 }
@@ -126,7 +131,6 @@ class _KelasScreenState extends State<KelasScreen> {
     });
 
     try {
-      // cari kelas_id
       final kelasResponse = await _supabase
           .from('kelas')
           .select('id')
@@ -141,11 +145,11 @@ class _KelasScreenState extends State<KelasScreen> {
 
       final kelasId = kelasResponse['id'];
 
-      // ambil semua siswa di kelas + relasi absensi (tanpa filter tanggal)
+      // PERBAIKAN: Ambil data dari relasi 'absensi' dan 'surat'
       final data = await _supabase
           .from('siswa')
           .select(
-            'id, no, nama, status, absensi(status, keterangan, surat_url, tanggal)',
+            'id, no, nama, status, absensi(keterangan, tanggal), surat(file_url, tanggal)',
           )
           .eq('kelas_id', kelasId)
           .order('no', ascending: true);
@@ -160,6 +164,7 @@ class _KelasScreenState extends State<KelasScreen> {
       });
     } catch (e) {
       if (!mounted) return;
+      print("!!! ERROR saat fetchData: $e");
       setState(
         () => _errorMessage = e.toString().replaceFirst("Exception: ", ""),
       );
@@ -176,17 +181,16 @@ class _KelasScreenState extends State<KelasScreen> {
 
   /// Navigasi ke halaman edit
   void _navigateToEdit(Siswa siswa) {
-    final today = DateTime.now();
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => EditSiswaScreen(
-          siswaId: siswa.id,
+          id: siswa.id,
           no: siswa.no.toString(),
           nama: siswa.nama,
-          tanggal: today,
-          suratUrl: siswa.absensiHariIni.suratUrl,
-          status: siswa.absensiHariIni.status,
+          keterangan: siswa.absensiHariIni.status,
+          // TAMBAHKAN BARIS INI untuk mengirim URL surat
+          suratUrl: siswa.suratUrlHariIni,
         ),
       ),
     ).then((isSuccess) {
@@ -400,7 +404,7 @@ class _KelasScreenState extends State<KelasScreen> {
 }
 
 /// =======================
-/// KOMONEN TAMBAHAN
+/// KOMPONEN TAMBAHAN
 /// =======================
 
 class _TableHeaderCell extends StatelessWidget {

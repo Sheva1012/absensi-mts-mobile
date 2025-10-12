@@ -11,8 +11,17 @@ import 'editSiswa.dart'; // Pastikan path ini benar
 class Absensi {
   final String status; // 'Hadir', 'Sakit', 'Izin', 'Alfa'
   final String? tanggal;
+  final String? fileUrlSurat;
+  final String? jenisSurat;
+  final String? statusVerifikasi;
 
-  Absensi({required this.status, this.tanggal});
+  Absensi({
+    required this.status,
+    this.tanggal,
+    this.fileUrlSurat,
+    this.jenisSurat,
+    this.statusVerifikasi,
+  });
 }
 
 class Siswa {
@@ -109,21 +118,20 @@ class _KelasScreenState extends State<KelasScreen> {
     super.dispose();
   }
 
-  /// Filter pencarian lokal
   void _filterSiswa() {
     final query = _searchController.text.toLowerCase();
     setState(() {
       if (query.isEmpty) {
         _filteredSiswaList = _originalSiswaList;
       } else {
-        _filteredSiswaList = _originalSiswaList.where((siswa) {
-          return siswa.nama.toLowerCase().contains(query);
-        }).toList();
+        _filteredSiswaList = _originalSiswaList
+            .where((siswa) => siswa.nama.toLowerCase().contains(query))
+            .toList();
       }
     });
   }
 
-  /// Ambil semua siswa dan absensi hari ini
+  /// ✅ Ambil semua siswa, absensi, dan surat via nested join
   Future<void> _fetchData() async {
     setState(() {
       _isLoading = true;
@@ -138,9 +146,7 @@ class _KelasScreenState extends State<KelasScreen> {
           .maybeSingle();
 
       if (kelasResponse == null || kelasResponse['id'] == null) {
-        throw Exception(
-          "Kelas '${widget.namaKelas}' tidak ditemukan di database.",
-        );
+        throw Exception("Kelas '${widget.namaKelas}' tidak ditemukan di database.");
       }
 
       final kelasId = kelasResponse['id'];
@@ -179,7 +185,6 @@ class _KelasScreenState extends State<KelasScreen> {
     await _fetchData();
   }
 
-  /// Navigasi ke halaman edit
   void _navigateToEdit(Siswa siswa) {
     Navigator.push(
       context,
@@ -267,10 +272,8 @@ class _KelasScreenState extends State<KelasScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Text(
-                  "😢 Gagal Memuat Data",
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                ),
+                const Text("😢 Gagal Memuat Data",
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 const SizedBox(height: 8),
                 Text(_errorMessage!, textAlign: TextAlign.center),
                 const SizedBox(height: 16),
@@ -393,10 +396,8 @@ class _KelasScreenState extends State<KelasScreen> {
             },
           ),
           const SizedBox(height: 6),
-          const Text(
-            "MTS Sunan Gunung Jati",
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-          ),
+          const Text("MTS Sunan Gunung Jati",
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         ],
       ),
     );

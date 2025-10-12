@@ -4,7 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 // Import semua halaman tujuan
 import 'formLogin.dart';
 import 'dashboard.dart';
-import 'absensi.dart';
+import 'scan_dashboard_screen.dart';
 
 class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});

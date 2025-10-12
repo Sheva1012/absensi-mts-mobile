@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-// PERBAIKAN: Import halaman scanner dan login
-import 'scanner.dart';
+
+// Import halaman login & scanner
 import 'formLogin.dart';
+import 'scanner_dialog.dart';
+
+final SupabaseClient supabase = Supabase.instance.client;
 
 class ScanDashboardScreen extends StatefulWidget {
   const ScanDashboardScreen({super.key});
@@ -12,61 +15,26 @@ class ScanDashboardScreen extends StatefulWidget {
 }
 
 class _ScanDashboardScreenState extends State<ScanDashboardScreen> {
-  bool _isScanning = false;
-
-  /// Fungsi ini akan dipanggil saat tombol power ditekan.
-  void _startScan() async {
-    setState(() {
-      _isScanning = true;
-    });
-
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        const SnackBar(
-          content: Text('Membuka kamera untuk memindai...'),
-          duration: Duration(seconds: 1),
-        ),
-      );
-
-    // Navigasi ke halaman scanner dan tunggu hasilnya
-    final result = await Navigator.push<String>(
-      context,
-      MaterialPageRoute(builder: (context) => const BarcodeScannerPage()),
-    );
-
-    // Hentikan status scanning setelah kembali dari halaman scanner
-    if (mounted) {
-      setState(() {
-        _isScanning = false;
-      });
-    }
-
-    // Lakukan sesuatu dengan hasil scan
-    if (result != null) {
-      print("Hasil Scan dari Dashboard: $result");
-
-      // Tampilkan notifikasi sukses
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Absensi berhasil untuk: $result'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } else {
-      print("Proses scan dibatalkan atau tidak ada hasil.");
-    }
-  }
-
-  /// Fungsi baru untuk menangani logout
+  /// Logout user dan kembali ke login
   Future<void> _handleLogout() async {
-    await Supabase.instance.client.auth.signOut();
+    await supabase.auth.signOut();
     if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (context) => const LoginScreen()),
         (route) => false,
       );
     }
+  }
+
+  /// ✅ BUKAN showDialog lagi — pakai Navigator.push untuk fullscreen scanner
+  void _openScanner() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        fullscreenDialog: true, // agar tampil dari bawah dan fullscreen
+        builder: (context) => const ContinuousScannerDialog(),
+      ),
+    );
   }
 
   @override
@@ -78,7 +46,6 @@ class _ScanDashboardScreenState extends State<ScanDashboardScreen> {
         backgroundColor: const Color(0xFF2F6CB0),
         foregroundColor: Colors.white,
         elevation: 1,
-        // PERBAIKAN: Tambahkan tombol logout di sini
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
@@ -103,8 +70,10 @@ class _ScanDashboardScreenState extends State<ScanDashboardScreen> {
                 ),
               ),
               const SizedBox(height: 40),
+
+              // Tombol Scan
               GestureDetector(
-                onTap: _isScanning ? null : _startScan,
+                onTap: _openScanner, // ganti dari _showScannerDialog ke _openScanner
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 300),
                   width: 180,
@@ -113,37 +82,31 @@ class _ScanDashboardScreenState extends State<ScanDashboardScreen> {
                     shape: BoxShape.circle,
                     color: Colors.white,
                     border: Border.all(
-                      color: _isScanning
-                          ? Colors.blue.shade200
-                          : Colors.grey.shade300,
+                      color: Colors.grey.shade300,
                       width: 2,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: _isScanning
-                            ? Colors.blue.withOpacity(0.2)
-                            : Colors.black.withOpacity(0.08),
-                        spreadRadius: _isScanning ? 8 : 4,
+                        color: Colors.black.withOpacity(0.08),
+                        spreadRadius: 4,
                         blurRadius: 20,
                       ),
                     ],
                   ),
                   child: Center(
                     child: Icon(
-                      Icons.power_settings_new,
+                      Icons.qr_code_scanner,
                       size: 80,
-                      color: _isScanning ? Colors.blue : Colors.grey.shade800,
+                      color: Colors.blue.shade800,
                     ),
                   ),
                 ),
               ),
+
               const SizedBox(height: 40),
-              if (_isScanning)
-                const Text(
-                  'Membuka kamera...',
-                  style: TextStyle(color: Colors.blue, fontSize: 16),
-                ),
               const Spacer(),
+
+              // Footer
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 child: Column(
@@ -172,4 +135,3 @@ class _ScanDashboardScreenState extends State<ScanDashboardScreen> {
     );
   }
 }
-

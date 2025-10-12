@@ -15,7 +15,13 @@ class Absensi {
   final String? jenisSurat;
   final String? statusVerifikasi;
 
-  Absensi({required this.status, this.tanggal});
+  Absensi({
+    required this.status,
+    this.tanggal,
+    this.fileUrlSurat,
+    this.jenisSurat,
+    this.statusVerifikasi,
+  });
 }
 
 class Siswa {

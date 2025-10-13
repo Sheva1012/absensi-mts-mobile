@@ -7,7 +7,6 @@ class EditSiswaScreen extends StatefulWidget {
   final int id;
   final String no;
   final String nama;
-  final String? keterangan;
   final String? suratUrl;
 
   const EditSiswaScreen({
@@ -15,7 +14,6 @@ class EditSiswaScreen extends StatefulWidget {
     required this.id,
     required this.no,
     required this.nama,
-    this.keterangan,
     this.suratUrl,
   });
 
@@ -28,15 +26,41 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
   final _supabase = Supabase.instance.client;
   final picker = ImagePicker();
 
-  String? selectedKeterangan;
+  String? selectedStatus;
   File? selectedFile;
   bool isLoading = false;
-  String? suratUrl; // untuk preview surat dari tabel surat
+  bool isLoadingStatus = true;
 
   @override
   void initState() {
     super.initState();
-    selectedKeterangan = widget.keterangan ?? 'Hadir';
+    _loadAbsensiStatus();
+  }
+
+  /// Ambil status absensi hari ini dari DB
+  Future<void> _loadAbsensiStatus() async {
+    final tanggalOnly = DateTime.now().toIso8601String().split('T').first;
+
+    final existingAbsensi = await _supabase
+        .from('absensi')
+        .select()
+        .eq('siswa_id', widget.id)
+        .eq('tanggal', tanggalOnly)
+        .maybeSingle();
+
+    setState(() {
+      if (existingAbsensi != null) {
+        selectedStatus = _capitalize(existingAbsensi['status'] ?? 'alfa');
+      } else {
+        selectedStatus = 'Alfa'; // Default kalau belum ada absen
+      }
+      isLoadingStatus = false;
+    });
+  }
+
+  String _capitalize(String value) {
+    if (value.isEmpty) return value;
+    return value[0].toUpperCase() + value.substring(1);
   }
 
   Future<void> _pickFile(ImageSource source) async {
@@ -46,7 +70,6 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
     }
   }
 
-  /// Simpan perubahan absensi + upload surat (jika perlu)
   Future<void> _submitForm() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => isLoading = true);
@@ -54,52 +77,61 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
     try {
       final tanggalOnly = DateTime.now().toIso8601String().split('T').first;
 
-      // === 1. PROSES TABEL ABSENSI ===
-      // Siapkan data untuk di-upsert ke tabel 'absensi'
-      final Map<String, dynamic> absensiData = {
-        'siswa_id': widget.id,
-        'tanggal': tanggalOnly,
-        'keterangan': selectedKeterangan,
-        'updated_at': DateTime.now().toIso8601String(),
-      };
+      // Cek apakah absensi hari ini sudah ada
+      final existingAbsensi = await _supabase
+          .from('absensi')
+          .select()
+          .eq('siswa_id', widget.id)
+          .eq('tanggal', tanggalOnly)
+          .maybeSingle();
 
-      // Gunakan upsert: jika data sudah ada, update. Jika tidak, insert.
-      await _supabase.from('absensi').upsert(absensiData);
-
-      // === 2. PROSES TABEL SURAT ===
-      final bool needsSurat =
-          selectedKeterangan == 'Sakit' || selectedKeterangan == 'Izin';
-
-      if (needsSurat) {
-        // Jika statusnya Sakit/Izin dan ada file baru yang dipilih
-        if (selectedFile != null) {
-          final ext = selectedFile!.path.split('.').last;
-          final fileName = '${widget.id}_$tanggalOnly.$ext';
-          final filePath = 'surat_izin/${widget.id}/$fileName';
-
-          // Upload file baru (menimpa yang lama jika ada)
-          await _supabase.storage
-              .from('surat_keterangan')
-              .upload(
-                filePath,
-                selectedFile!,
-                fileOptions: const FileOptions(upsert: true),
-              );
-
-          final fileUrl = _supabase.storage
-              .from('surat_keterangan')
-              .getPublicUrl(filePath);
-
-          // Upsert data ke tabel 'surat'
-          await _supabase.from('surat').upsert({
-            'siswa_id': widget.id,
-            'tanggal': tanggalOnly,
-            'file_url': fileUrl,
-            'updated_at': DateTime.now().toIso8601String(),
-          });
-        }
+      if (existingAbsensi != null) {
+        // Sudah ada → update status
+        await _supabase
+            .from('absensi')
+            .update({
+              'status': selectedStatus?.toLowerCase() ?? 'alfa',
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('id', existingAbsensi['id']);
       } else {
-        // Jika statusnya Hadir/Alfa, hapus data surat yang mungkin ada
+        // Belum ada → insert baru (validasi manual oleh guru)
+        await _supabase.from('absensi').insert({
+          'siswa_id': widget.id,
+          'tanggal': tanggalOnly,
+          'status': selectedStatus?.toLowerCase() ?? 'alfa',
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      }
+
+      // Proses surat jika sakit/izin
+      final bool needsSurat =
+          selectedStatus == 'Sakit' || selectedStatus == 'Izin';
+
+      if (needsSurat && selectedFile != null) {
+        final ext = selectedFile!.path.split('.').last;
+        final fileName = '${widget.id}_$tanggalOnly.$ext';
+        final filePath = 'surat_izin/${widget.id}/$fileName';
+
+        await _supabase.storage
+            .from('surat_keterangan')
+            .upload(
+              filePath,
+              selectedFile!,
+              fileOptions: const FileOptions(upsert: true),
+            );
+
+        final fileUrl = _supabase.storage
+            .from('surat_keterangan')
+            .getPublicUrl(filePath);
+
+        await _supabase.from('surat').upsert({
+          'siswa_id': widget.id,
+          'tanggal': tanggalOnly,
+          'file_url': fileUrl,
+          'updated_at': DateTime.now().toIso8601String(),
+        });
+      } else {
         await _supabase.from('surat').delete().match({
           'siswa_id': widget.id,
           'tanggal': tanggalOnly,
@@ -109,7 +141,7 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('✅ Status absensi berhasil disimpan'),
+          content: Text('✅ Status absensi berhasil diperbarui'),
           backgroundColor: Colors.green,
         ),
       );
@@ -130,13 +162,16 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
     }
   }
 
-  /// =======================
-  /// UI SECTION
-  /// =======================
   @override
   Widget build(BuildContext context) {
+    if (isLoadingStatus) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     final bool isUploadEnabled =
-        selectedKeterangan == 'Sakit' || selectedKeterangan == 'Izin';
+        selectedStatus == 'Sakit' || selectedStatus == 'Izin';
 
     return Scaffold(
       appBar: AppBar(
@@ -155,9 +190,9 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
               _buildReadOnlyField('Nama Siswa', widget.nama),
               const SizedBox(height: 20),
 
-              const Text('Keterangan'),
+              const Text('Status Absensi'),
               DropdownButtonFormField<String>(
-                initialValue: selectedKeterangan,
+                value: selectedStatus,
                 items: const [
                   DropdownMenuItem(value: 'Hadir', child: Text('Hadir')),
                   DropdownMenuItem(value: 'Sakit', child: Text('Sakit')),
@@ -166,7 +201,7 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
                 ],
                 onChanged: (val) {
                   setState(() {
-                    selectedKeterangan = val;
+                    selectedStatus = val;
                     if (val == 'Hadir' || val == 'Alfa') {
                       selectedFile = null;
                     }
@@ -178,36 +213,6 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
               ),
               const SizedBox(height: 20),
 
-              // Tampilkan preview surat yang sudah ada JIKA belum ada file baru yang dipilih
-              if (widget.suratUrl != null && selectedFile == null)
-                Column(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        widget.suratUrl!,
-                        height: 180,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                        errorBuilder: (c, e, s) => Container(
-                          height: 150,
-                          width: double.infinity,
-                          color: Colors.grey.shade200,
-                          child: const Center(
-                            child: Text('Gagal memuat gambar surat'),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Surat keterangan sebelumnya',
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                    const SizedBox(height: 20),
-                  ],
-                ),
-
               Text(
                 'Upload Surat Keterangan',
                 style: TextStyle(
@@ -216,93 +221,66 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
               ),
               const SizedBox(height: 8),
               GestureDetector(
-                onTap: isUploadEnabled
-                    ? () => _pickFile(ImageSource.gallery)
-                    : null,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      height: 60,
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey.shade400),
-                        borderRadius: BorderRadius.circular(8),
-                        color: isUploadEnabled
-                            ? Colors.grey.shade100
-                            : Colors.grey.shade300,
-                      ),
-                      child: Center(
-                        child: Text(
-                          selectedFile == null
-                              ? 'Pilih file dari galeri'
-                              : selectedFile!.path.split('/').last,
-                          style: TextStyle(
-                            color: isUploadEnabled
-                                ? Colors.black
-                                : Colors.grey[600],
-                          ),
-                        ),
+                onTap:
+                    isUploadEnabled ? () => _pickFile(ImageSource.gallery) : null,
+                child: Container(
+                  height: 60,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey.shade400),
+                    borderRadius: BorderRadius.circular(8),
+                    color: isUploadEnabled
+                        ? Colors.grey.shade100
+                        : Colors.grey.shade300,
+                  ),
+                  child: Center(
+                    child: Text(
+                      selectedFile == null
+                          ? 'Pilih file dari galeri'
+                          : selectedFile!.path.split('/').last,
+                      style: TextStyle(
+                        color:
+                            isUploadEnabled ? Colors.black : Colors.grey[600],
                       ),
                     ),
-
-                    const SizedBox(height: 10),
-                    const Center(child: Text('Atau')),
-                    const SizedBox(height: 10),
-
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: isUploadEnabled
-                            ? Colors.green
-                            : Colors.grey,
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size(double.infinity, 50),
-                      ),
-                      onPressed: isUploadEnabled
-                          ? () => _pickFile(ImageSource.camera)
-                          : null,
-                      icon: const Icon(Icons.camera_alt),
-                      label: const Text('Ambil Foto'),
-                    ),
-
-                    const SizedBox(height: 40),
-
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.grey,
-                              foregroundColor: Colors.white,
-                            ),
-                            onPressed: () => Navigator.pop(context),
-                            child: const Text('Batal'),
-                          ),
-                        ),
-                        const SizedBox(width: 20),
-                        Expanded(
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue,
-                              foregroundColor: Colors.white,
-                            ),
-                            onPressed: isLoading ? null : _submitForm,
-                            child: isLoading
-                                ? const SizedBox(
-                                    height: 20,
-                                    width: 20,
-                                    child: CircularProgressIndicator(
-                                      color: Colors.white,
-                                      strokeWidth: 3,
-                                    ),
-                                  )
-                                : const Text('Simpan'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+                  ),
                 ),
+              ),
+              const SizedBox(height: 40),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.grey,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Batal'),
+                    ),
+                  ),
+                  const SizedBox(width: 20),
+                  Expanded(
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: isLoading ? null : _submitForm,
+                      child: isLoading
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 3,
+                              ),
+                            )
+                          : const Text('Simpan'),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -311,7 +289,6 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
     );
   }
 
-  /// Widget untuk field readonly (No, Nama, Tanggal)
   Widget _buildReadOnlyField(String label, String value) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

@@ -1,13 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'editSiswa.dart'; // Pastikan path ini benar
+import 'editSiswa.dart';
 
 /// =======================
 /// MODEL DATA (DIPERBARUI)
 /// =======================
 
-// Model ini sekarang hanya fokus pada data dari tabel 'absensi'
 class Absensi {
   final String status; // 'Hadir', 'Sakit', 'Izin', 'Alfa'
   final String? tanggal;
@@ -28,9 +27,9 @@ class Siswa {
   final int id;
   final int no;
   final String nama;
-  final String statusSiswa; // status_siswa (aktif / nonaktif)
+  final String statusSiswa;
   final Absensi absensiHariIni;
-  final String? suratUrlHariIni; // URL surat sekarang disimpan di sini
+  final String? suratUrlHariIni;
 
   Siswa({
     required this.id,
@@ -41,31 +40,25 @@ class Siswa {
     this.suratUrlHariIni,
   });
 
-  // Factory ini diperbarui untuk memproses relasi 'absensi' dan 'surat'
   factory Siswa.fromJson(Map<String, dynamic> json) {
     final absensiList = json['absensi'] as List<dynamic>? ?? [];
-    final suratList =
-        json['surat'] as List<dynamic>? ?? []; // Ambil data dari relasi 'surat'
+    final suratList = json['surat'] as List<dynamic>? ?? [];
     final today = DateTime.now().toIso8601String().split('T').first;
 
-    // Cari absensi hari ini dari relasi 'absensi'
     final absensiTodayMap = absensiList
         .cast<Map<String, dynamic>?>()
         .firstWhere((a) => a?['tanggal'] == today, orElse: () => null);
 
-    // Cari surat hari ini dari relasi 'surat'
     final suratTodayMap = suratList.cast<Map<String, dynamic>?>().firstWhere(
       (s) => s?['tanggal'] == today,
       orElse: () => null,
     );
 
-    // Tentukan status absensi. Default-nya 'Alfa' jika tidak ada data.
     final absensi = Absensi(
-      status: absensiTodayMap?['keterangan'] ?? 'Alfa',
+      status: _capitalize(absensiTodayMap?['status'] ?? 'Alfa'),
       tanggal: absensiTodayMap?['tanggal'],
     );
 
-    // Ambil URL surat jika ada
     final suratUrl = suratTodayMap?['file_url'] as String?;
 
     return Siswa(
@@ -76,6 +69,11 @@ class Siswa {
       absensiHariIni: absensi,
       suratUrlHariIni: suratUrl,
     );
+  }
+
+  static String _capitalize(String value) {
+    if (value.isEmpty) return value;
+    return value[0].toUpperCase() + value.substring(1);
   }
 }
 
@@ -131,7 +129,7 @@ class _KelasScreenState extends State<KelasScreen> {
     });
   }
 
-  /// ✅ Ambil semua siswa, absensi, dan surat via nested join
+  /// ✅ Ambil semua siswa + absensi + surat
   Future<void> _fetchData() async {
     setState(() {
       _isLoading = true;
@@ -146,16 +144,18 @@ class _KelasScreenState extends State<KelasScreen> {
           .maybeSingle();
 
       if (kelasResponse == null || kelasResponse['id'] == null) {
-        throw Exception("Kelas '${widget.namaKelas}' tidak ditemukan di database.");
+        throw Exception(
+          "Kelas '${widget.namaKelas}' tidak ditemukan di database.",
+        );
       }
 
       final kelasId = kelasResponse['id'];
 
-      // PERBAIKAN: Ambil data dari relasi 'absensi' dan 'surat'
+      // Ambil data absensi dan surat dengan kolom yang benar
       final data = await _supabase
           .from('siswa')
           .select(
-            'id, no, nama, status, absensi(keterangan, tanggal), surat(file_url, tanggal)',
+            'id, no, nama, status, absensi(status, tanggal), surat(file_url, tanggal)',
           )
           .eq('kelas_id', kelasId)
           .order('no', ascending: true);
@@ -193,8 +193,7 @@ class _KelasScreenState extends State<KelasScreen> {
           id: siswa.id,
           no: siswa.no.toString(),
           nama: siswa.nama,
-          keterangan: siswa.absensiHariIni.status,
-          // TAMBAHKAN BARIS INI untuk mengirim URL surat
+          // status: siswa.absensiHariIni.status,  // HAPUS BARIS INI
           suratUrl: siswa.suratUrlHariIni,
         ),
       ),
@@ -272,8 +271,10 @@ class _KelasScreenState extends State<KelasScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Text("😢 Gagal Memuat Data",
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const Text(
+                  "😢 Gagal Memuat Data",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
                 const SizedBox(height: 8),
                 Text(_errorMessage!, textAlign: TextAlign.center),
                 const SizedBox(height: 16),
@@ -396,17 +397,15 @@ class _KelasScreenState extends State<KelasScreen> {
             },
           ),
           const SizedBox(height: 6),
-          const Text("MTS Sunan Gunung Jati",
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          const Text(
+            "MTS Sunan Gunung Jati",
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          ),
         ],
       ),
     );
   }
 }
-
-/// =======================
-/// KOMPONEN TAMBAHAN
-/// =======================
 
 class _TableHeaderCell extends StatelessWidget {
   final String text;

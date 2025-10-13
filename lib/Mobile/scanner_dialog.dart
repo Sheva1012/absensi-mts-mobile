@@ -74,16 +74,31 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
 
       await _showPopup('✅ Absensi masuk tercatat\n$namaSiswa');
     } else {
-      // Sudah absen -> langsung isi waktu_pulang jika belum ada
+      // Sudah absen -> cek waktu pulang
       final existing = existingList.first;
       final waktuPulang = existing['waktu_pulang'];
+      final waktuMasukStr = existing['waktu_masuk'];
 
       if (waktuPulang != null) {
         await _showPopup('⚠️ Sudah tercatat waktu pulang sebelumnya', color: Colors.orange);
         return;
       }
 
-      // Update waktu_pulang tanpa cek delay
+      // Cek delay minimal 5 menit dari waktu_masuk
+      if (waktuMasukStr != null) {
+        final waktuMasukToday = DateTime.parse("$today $waktuMasukStr");
+        final durasi = now.difference(waktuMasukToday);
+
+        if (durasi.inMinutes < 5) {
+          await _showPopup(
+            '⏱️ Belum bisa absen pulang.\nTunggu ${5 - durasi.inMinutes} menit lagi.',
+            color: Colors.orange,
+          );
+          return;
+        }
+      }
+
+      // Update waktu_pulang jika delay terpenuhi
       await supabase
           .from('absensi')
           .update({'waktu_pulang': now.toIso8601String().substring(11, 19)})

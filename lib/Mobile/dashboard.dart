@@ -44,6 +44,7 @@ class ClassSummary {
   final int sudahAbsen;
   final int belumAbsen;
   final int butuhValidasi;
+  final int tidakMasuk; // <-- TAMBAHKAN INI
 
   ClassSummary({
     required this.namaKelas,
@@ -51,6 +52,7 @@ class ClassSummary {
     required this.sudahAbsen,
     required this.belumAbsen,
     required this.butuhValidasi,
+    required this.tidakMasuk, // <-- TAMBAHKAN INI
   });
 }
 
@@ -95,8 +97,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final user = _supabase.auth.currentUser;
     if (user == null) return null;
     try {
-      final data =
-          await _supabase.from('guru').select().eq('id', user.id).single();
+      final data = await _supabase
+          .from('guru')
+          .select()
+          .eq('id', user.id)
+          .single();
       return TeacherProfile.fromSupabase(data);
     } catch (e) {
       print('Error fetching teacher profile: $e');
@@ -111,7 +116,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
-              body: Center(child: CircularProgressIndicator()));
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
 
         if (snapshot.hasError || !snapshot.hasData || snapshot.data == null) {
@@ -124,7 +130,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ElevatedButton(
                     onPressed: () async => await _supabase.auth.signOut(),
                     child: const Text('Kembali ke Login'),
-                  )
+                  ),
                 ],
               ),
             ),
@@ -148,9 +154,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           body: Row(
             children: [
               if (isDesktop) AppSidebar(teacherProfile: teacherProfile),
-              // Ganti MainContent statis dengan yang dinamis
               Expanded(
-                  child: MainDashboardContent(teacherProfile: teacherProfile)),
+                child: MainDashboardContent(teacherProfile: teacherProfile),
+              ),
             ],
           ),
         );
@@ -183,15 +189,21 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
     });
   }
 
-  // PERBAIKAN: Fungsi ini telah ditulis ulang untuk mengambil data dari tabel 'absensi' dan 'surat'
   Future<DashboardData> _fetchDashboardData() async {
     try {
-      final List<String> namaKelasList = widget.teacherProfile.kelasDiampu.values
+      final List<String> namaKelasList = widget
+          .teacherProfile
+          .kelasDiampu
+          .values
           .expand((list) => list)
           .toList();
 
       if (namaKelasList.isEmpty) {
-        return DashboardData(summaries: [], totalSiswaAlfa: 0, totalButuhValidasi: 0);
+        return DashboardData(
+          summaries: [],
+          totalSiswaAlfa: 0,
+          totalButuhValidasi: 0,
+        );
       }
 
       final List<Map<String, dynamic>> kelasDataList = await _supabase
@@ -199,40 +211,88 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
           .select('id, nama_kelas')
           .inFilter('nama_kelas', namaKelasList);
 
-      final List<int> kelasIdList = kelasDataList.map<int>((e) => e['id'] as int).toList();
+      // PERBAIKAN: Tambahkan null safety saat mapping ID
+      final List<int> kelasIdList = kelasDataList
+          .map<int?>((e) => e['id'] as int?)
+          .where((id) => id != null)
+          .cast<int>()
+          .toList();
+
       if (kelasIdList.isEmpty) {
-        return DashboardData(summaries: [], totalSiswaAlfa: 0, totalButuhValidasi: 0);
+        return DashboardData(
+          summaries: [],
+          totalSiswaAlfa: 0,
+          totalButuhValidasi: 0,
+        );
       }
-      
+
       final List<Map<String, dynamic>> allSiswaList = await _supabase
-        .from('siswa')
-        .select('id, kelas_id')
-        .inFilter('kelas_id', kelasIdList);
-        
-      final List<int> allSiswaIds = allSiswaList.map<int>((s) => s['id'] as int).toList();
+          .from('siswa')
+          .select('id, kelas_id')
+          .inFilter('kelas_id', kelasIdList);
+
+      // PERBAIKAN: Tambahkan null safety saat mapping ID
+      final List<int> allSiswaIds = allSiswaList
+          .map<int?>((s) => s['id'] as int?)
+          .where((id) => id != null)
+          .cast<int>()
+          .toList();
+
       if (allSiswaIds.isEmpty) {
-        return DashboardData(summaries: [], totalSiswaAlfa: 0, totalButuhValidasi: 0);
+        return DashboardData(
+          summaries: [],
+          totalSiswaAlfa: 0,
+          totalButuhValidasi: 0,
+        );
       }
 
       final today = DateTime.now();
-      final todayStart = DateTime(today.year, today.month, today.day).toIso8601String();
-      final tomorrowStart = DateTime(today.year, today.month, today.day + 1).toIso8601String();
-      
-      // Ambil data dari tabel 'absensi'
-      final List<Map<String, dynamic>> allAbsensiList = await _supabase
-        .from('absensi')
-        .select('siswa_id, keterangan')
-        .inFilter('siswa_id', allSiswaIds)
-        .gte('created_at', todayStart)
-        .lt('created_at', tomorrowStart);
+      final todayStart = DateTime(
+        today.year,
+        today.month,
+        today.day,
+      ).toIso8601String();
+      final tomorrowStart = DateTime(
+        today.year,
+        today.month,
+        today.day + 1,
+      ).toIso8601String();
 
-      // Ambil data dari tabel 'surat'
+      final List<Map<String, dynamic>> allAbsensiList = await _supabase
+          .from('absensi')
+          .select('siswa_id, status')
+          .inFilter('siswa_id', allSiswaIds)
+          .gte('created_at', todayStart)
+          .lt('created_at', tomorrowStart);
+
       final List<Map<String, dynamic>> allSuratList = await _supabase
-        .from('surat') // <-- Mengambil dari tabel 'surat'
-        .select('siswa_id, file_url')
-        .inFilter('siswa_id', allSiswaIds)
-        .gte('created_at', todayStart)
-        .lt('created_at', tomorrowStart);
+          .from('surat')
+          .select('siswa_id, file_url')
+          .inFilter('siswa_id', allSiswaIds)
+          .gte('created_at', todayStart)
+          .lt('created_at', tomorrowStart);
+
+      // PERBAIKAN: Tambahkan null safety saat mapping ID
+      final Set<int> siswaIdsWithSurat = allSuratList
+          .map<int?>((s) => s['siswa_id'] as int?)
+          .where((id) => id != null)
+          .cast<int>()
+          .toSet();
+
+      final List<Map<String, dynamic>> absensiSakitIzin = allAbsensiList.where((
+        a,
+      ) {
+        final status = a['status']?.toString().trim().toLowerCase();
+        return status == 'sakit' || status == 'izin';
+      }).toList();
+
+      final List<Map<String, dynamic>> absensiButuhValidasi = absensiSakitIzin
+          .where((a) {
+            return !siswaIdsWithSurat.contains(a['siswa_id']);
+          })
+          .toList();
+
+      final totalButuhValidasi = absensiButuhValidasi.length;
 
       final summaries = kelasDataList.map((kelasData) {
         final kelasId = kelasData['id'];
@@ -242,32 +302,43 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
             .where((s) => s['kelas_id'] == kelasId)
             .map<int>((s) => s['id'] as int)
             .toSet();
-        
+
         final totalSiswa = siswaIdsInThisClass.length;
 
         final absensiForThisClass = allAbsensiList
             .where((a) => siswaIdsInThisClass.contains(a['siswa_id']))
             .toList();
 
-        final suratForThisClass = allSuratList
-            .where((s) => siswaIdsInThisClass.contains(s['siswa_id']))
-            .toList();
+        final sudahAbsen = absensiForThisClass
+            .where(
+              (a) => a['status']?.toString().trim().toLowerCase() == 'hadir',
+            )
+            .length;
 
-        final sudahAbsen = absensiForThisClass.where((a) => a['keterangan'] == 'Hadir').length;
         final belumAbsen = totalSiswa - absensiForThisClass.length;
-        final butuhValidasi = suratForThisClass.length; // Hitung dari tabel 'surat'
+
+        final butuhValidasi = absensiButuhValidasi
+            .where((a) => siswaIdsInThisClass.contains(a['siswa_id']))
+            .length;
+
+        final tidakMasuk = absensiForThisClass.where((a) {
+          final status = a['status']?.toString().trim().toLowerCase();
+          return status == 'sakit' || status == 'izin' || status == 'alfa';
+        }).length;
 
         return ClassSummary(
-            namaKelas: namaKelas,
-            totalSiswa: totalSiswa,
-            sudahAbsen: sudahAbsen,
-            belumAbsen: belumAbsen,
-            butuhValidasi: butuhValidasi,
+          namaKelas: namaKelas,
+          totalSiswa: totalSiswa,
+          sudahAbsen: sudahAbsen,
+          belumAbsen: belumAbsen,
+          butuhValidasi: butuhValidasi,
+          tidakMasuk: tidakMasuk,
         );
       }).toList();
 
-      final totalSiswaAlfa = allAbsensiList.where((a) => a['keterangan'] == 'Alfa').length;
-      final totalButuhValidasi = allSuratList.length;
+      final totalSiswaAlfa = allAbsensiList
+          .where((a) => a['status']?.toString().trim().toLowerCase() == 'alfa')
+          .length;
 
       return DashboardData(
         summaries: summaries,
@@ -279,7 +350,6 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
       throw Exception("Gagal memuat data dashboard.");
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -295,7 +365,10 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text("Error: ${snapshot.error}"),
-                ElevatedButton(onPressed: _refreshData, child: const Text("Coba Lagi")),
+                ElevatedButton(
+                  onPressed: _refreshData,
+                  child: const Text("Coba Lagi"),
+                ),
               ],
             ),
           );
@@ -307,21 +380,32 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              Text("Ringkasan Hari Ini", style: Theme.of(context).textTheme.headlineSmall),
+              Text(
+                "Ringkasan Hari Ini",
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
               const SizedBox(height: 16),
-              
+
               _buildQuickStatsCard(data.persentaseKehadiran),
               const SizedBox(height: 24),
-              
-              _buildUrgentNotifications(data.totalSiswaAlfa, data.totalButuhValidasi),
+
+              _buildUrgentNotifications(
+                data.totalSiswaAlfa,
+                data.totalButuhValidasi,
+              ),
               const SizedBox(height: 24),
-              
-              Text("Summary Kelas", style: Theme.of(context).textTheme.headlineSmall),
+
+              Text(
+                "Summary Kelas",
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
               const SizedBox(height: 16),
-              
+
               if (data.summaries.isEmpty)
                 const Center(child: Text("Tidak ada kelas yang diajar.")),
-              ...data.summaries.map((summary) => _buildClassSummaryCard(summary)),
+              ...data.summaries.map(
+                (summary) => _buildClassSummaryCard(summary),
+              ),
             ],
           ),
         );
@@ -349,7 +433,12 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
                     backgroundColor: Colors.grey[300],
                     valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
                   ),
-                  Center(child: Text("${percentage.toStringAsFixed(0)}%", style: TextStyle(fontWeight: FontWeight.bold))),
+                  Center(
+                    child: Text(
+                      "${percentage.toStringAsFixed(0)}%",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -358,11 +447,16 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text("Tingkat Kehadiran", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  Text("Persentase siswa yang hadir hari ini dari semua kelas."),
+                  Text(
+                    "Tingkat Kehadiran",
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  Text(
+                    "Persentase siswa yang hadir hari ini dari semua kelas.",
+                  ),
                 ],
               ),
-            )
+            ),
           ],
         ),
       ),
@@ -370,40 +464,51 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
   }
 
   Widget _buildUrgentNotifications(int totalAlfa, int totalValidasi) {
-     return Column(
-       crossAxisAlignment: CrossAxisAlignment.start,
-       children: [
-         Text("Notifikasi Penting", style: Theme.of(context).textTheme.titleMedium),
-         const SizedBox(height: 8),
-         if (totalAlfa == 0 && totalValidasi == 0)
-           const Card(
-             color: Colors.white,
-             child: ListTile(
-               leading: Icon(Icons.check_circle_outline, color: Colors.green),
-               title: Text("Tidak ada notifikasi"),
-               subtitle: Text("Semua absensi sudah lengkap."),
-             ),
-           ),
-         if (totalAlfa > 0)
-           Card(
-             color: Colors.red[50],
-             child: ListTile(
-               leading: Icon(Icons.warning_amber_rounded, color: Colors.red[700]),
-               title: Text("$totalAlfa Siswa Alfa"),
-               subtitle: Text("Segera tindak lanjuti siswa yang tidak hadir tanpa keterangan."),
-             ),
-           ),
-         if (totalValidasi > 0)
-           Card(
-             color: Colors.orange[50],
-             child: ListTile(
-               leading: Icon(Icons.pending_actions_outlined, color: Colors.orange[700]),
-               title: Text("$totalValidasi Surat Pending"),
-               subtitle: Text("Terdapat surat keterangan sakit/izin yang perlu divalidasi."),
-             ),
-           ),
-       ],
-     );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          "Notifikasi Penting",
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 8),
+        if (totalAlfa == 0 && totalValidasi == 0)
+          const Card(
+            color: Colors.white,
+            child: ListTile(
+              leading: Icon(Icons.check_circle_outline, color: Colors.green),
+              title: Text("Tidak ada notifikasi"),
+              subtitle: Text("Semua absensi sudah lengkap."),
+            ),
+          ),
+        if (totalAlfa > 0)
+          Card(
+            color: Colors.red[50],
+            child: ListTile(
+              leading: Icon(
+                Icons.warning_amber_rounded,
+                color: Colors.red[700],
+              ),
+              title: Text("$totalAlfa Siswa Alfa"),
+              subtitle: Text(
+                "Segera tindak lanjuti siswa yang tidak hadir tanpa keterangan.",
+              ),
+            ),
+          ),
+        if (totalValidasi > 0)
+          Card(
+            color: Colors.orange[50],
+            child: ListTile(
+              leading: Icon(
+                Icons.pending_actions_outlined,
+                color: Colors.orange[700],
+              ),
+              title: Text("$totalValidasi Surat Pending"),
+              subtitle: Text("Siswa sakit/izin tetapi belum mengunggah surat."),
+            ),
+          ),
+      ],
+    );
   }
 
   Widget _buildClassSummaryCard(ClassSummary summary) {
@@ -416,18 +521,29 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(summary.namaKelas, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            Text(
+              summary.namaKelas,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
             const SizedBox(height: 4),
-            Text("Total Siswa: ${summary.totalSiswa}", style: TextStyle(color: Colors.grey[600])),
+            Text(
+              "Total Siswa: ${summary.totalSiswa}",
+              style: TextStyle(color: Colors.grey[600]),
+            ),
             const Divider(height: 24),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 _buildStatItem("Hadir", summary.sudahAbsen, Colors.green),
-                _buildStatItem("Belum Absen", summary.belumAbsen, Colors.orange),
+                _buildStatItem("Tidak Masuk", summary.tidakMasuk, Colors.red),
+                _buildStatItem(
+                  "Belum Absen",
+                  summary.belumAbsen,
+                  Colors.orange,
+                ),
                 _buildStatItem("Validasi", summary.butuhValidasi, Colors.blue),
               ],
-            )
+            ),
           ],
         ),
       ),
@@ -437,13 +553,19 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
   Widget _buildStatItem(String label, int count, Color color) {
     return Column(
       children: [
-        Text(count.toString(), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22, color: color)),
+        Text(
+          count.toString(),
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 22,
+            color: color,
+          ),
+        ),
         Text(label, style: TextStyle(color: Colors.grey[700])),
       ],
     );
   }
 }
-
 
 // SIDEBAR (Tidak ada perubahan signifikan, hanya memastikan ada)
 class AppSidebar extends StatefulWidget {
@@ -467,8 +589,8 @@ class _AppSidebarState extends State<AppSidebar> {
 
   @override
   Widget build(BuildContext context) {
-    final List<String> tingkatKelas =
-        widget.teacherProfile.kelasDiampu.keys.toList();
+    final List<String> tingkatKelas = widget.teacherProfile.kelasDiampu.keys
+        .toList();
     tingkatKelas.sort();
     return Container(
       width: 250,
@@ -481,7 +603,13 @@ class _AppSidebarState extends State<AppSidebar> {
               child: Row(
                 children: [
                   const Expanded(
-                    child: Text('MTs Sunan Gunung Jati', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    child: Text(
+                      'MTs Sunan Gunung Jati',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
                   ),
                   IconButton(
                     icon: const Icon(Icons.menu),
@@ -507,7 +635,8 @@ class _AppSidebarState extends State<AppSidebar> {
                   ),
                   ...List.generate(tingkatKelas.length, (index) {
                     final namaTingkat = tingkatKelas[index];
-                    final subMenus = widget.teacherProfile.kelasDiampu[namaTingkat]!;
+                    final subMenus =
+                        widget.teacherProfile.kelasDiampu[namaTingkat]!;
                     return _buildClassExpansionTile(
                       title: namaTingkat,
                       baseIndex: (index + 1) * 10,
@@ -519,29 +648,38 @@ class _AppSidebarState extends State<AppSidebar> {
             ),
             const Divider(height: 1),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16.0,
+                vertical: 12.0,
+              ),
               child: Row(
                 children: [
-                   CircleAvatar(
-                      radius: 20,
-                      backgroundColor: Colors.grey.shade200,
-                      backgroundImage: widget.teacherProfile.avatarUrl != null
-                          ? NetworkImage(widget.teacherProfile.avatarUrl!)
-                          : null,
-                      child: widget.teacherProfile.avatarUrl == null
-                          ? const Icon(Icons.person, color: Colors.grey)
-                          : null,
-                    ),
+                  CircleAvatar(
+                    radius: 20,
+                    backgroundColor: Colors.grey.shade200,
+                    backgroundImage: widget.teacherProfile.avatarUrl != null
+                        ? NetworkImage(widget.teacherProfile.avatarUrl!)
+                        : null,
+                    child: widget.teacherProfile.avatarUrl == null
+                        ? const Icon(Icons.person, color: Colors.grey)
+                        : null,
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       widget.teacherProfile.nama,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.exit_to_app, color: Colors.redAccent),
+                    icon: const Icon(
+                      Icons.exit_to_app,
+                      color: Colors.redAccent,
+                    ),
                     tooltip: 'Logout',
                     onPressed: _handleLogout,
                   ),
@@ -568,8 +706,14 @@ class _AppSidebarState extends State<AppSidebar> {
         borderRadius: BorderRadius.circular(8),
       ),
       child: ListTile(
-        leading: Icon(icon, color: isSelected ? Colors.white : Colors.grey[700]),
-        title: Text(title, style: TextStyle(color: isSelected ? Colors.white : Colors.black)),
+        leading: Icon(
+          icon,
+          color: isSelected ? Colors.white : Colors.grey[700],
+        ),
+        title: Text(
+          title,
+          style: TextStyle(color: isSelected ? Colors.white : Colors.black),
+        ),
         onTap: onTap,
       ),
     );
@@ -588,7 +732,13 @@ class _AppSidebarState extends State<AppSidebar> {
         borderRadius: BorderRadius.circular(8),
       ),
       child: ListTile(
-        title: Text(title, style: TextStyle(color: isSelected ? Colors.white : Colors.black, fontSize: 14)),
+        title: Text(
+          title,
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.black,
+            fontSize: 14,
+          ),
+        ),
         onTap: onTap,
       ),
     );
@@ -600,10 +750,16 @@ class _AppSidebarState extends State<AppSidebar> {
     required List<String> subMenus,
   }) {
     bool isGroupSelected =
-        _selectedIndex >= baseIndex && _selectedIndex < baseIndex + subMenus.length + 1;
+        _selectedIndex >= baseIndex &&
+        _selectedIndex < baseIndex + subMenus.length + 1;
     return ExpansionTile(
       leading: const Icon(Icons.people_outline),
-      title: Text(title, style: TextStyle(fontWeight: isGroupSelected ? FontWeight.bold : FontWeight.normal)),
+      title: Text(
+        title,
+        style: TextStyle(
+          fontWeight: isGroupSelected ? FontWeight.bold : FontWeight.normal,
+        ),
+      ),
       backgroundColor: isGroupSelected ? Colors.blue.withOpacity(0.05) : null,
       childrenPadding: const EdgeInsets.only(left: 30),
       onExpansionChanged: (isExpanded) {
@@ -623,7 +779,9 @@ class _AppSidebarState extends State<AppSidebar> {
             setState(() => _selectedIndex = currentIndex);
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (context) => KelasScreen(namaKelas: subMenus[index])),
+              MaterialPageRoute(
+                builder: (context) => KelasScreen(namaKelas: subMenus[index]),
+              ),
             );
           },
         );
@@ -631,4 +789,3 @@ class _AppSidebarState extends State<AppSidebar> {
     );
   }
 }
-

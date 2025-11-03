@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'dart:convert';
+import 'package:intl/intl.dart';
+
+import 'scanner.dart';
 
 final SupabaseClient supabase = Supabase.instance.client;
 
@@ -9,15 +10,18 @@ class ContinuousScannerDialog extends StatefulWidget {
   const ContinuousScannerDialog({super.key});
 
   @override
-  State<ContinuousScannerDialog> createState() => _ContinuousScannerDialogState();
+  State<ContinuousScannerDialog> createState() =>
+      _ContinuousScannerDialogState();
 }
 
 class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
   bool _isProcessing = false;
   String? _lastScan;
   DateTime _lastScanTime = DateTime.now();
+  Color _borderColor = Colors.red;
 
   Future<void> _showPopup(String message, {Color color = Colors.green}) async {
+    if (!mounted) return;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -29,20 +33,17 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
             color: color,
             borderRadius: BorderRadius.circular(14),
             boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.3),
-                blurRadius: 20,
-              )
+              BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 20),
             ],
           ),
-          child: Text(
-            message,
-            textAlign: TextAlign.center,
+          child: DefaultTextStyle(
             style: const TextStyle(
               fontSize: 18,
               color: Colors.white,
               fontWeight: FontWeight.bold,
+              decoration: TextDecoration.none,
             ),
+            child: Text(message, textAlign: TextAlign.center),
           ),
         ),
       ),
@@ -52,11 +53,40 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
     if (mounted) Navigator.pop(context);
   }
 
-  Future<void> _prosesAbsensi(int siswaId, String namaSiswa) async {
+  Future<void> _prosesAbsensi(
+    int siswaId,
+    String namaSiswa,
+    int? kelasId,
+  ) async {
     final today = DateTime.now().toIso8601String().substring(0, 10);
     final now = DateTime.now();
+    final String jamScanStr = now.toIso8601String().substring(11, 19);
 
-    // Cek apakah sudah ada absensi hari ini
+    // Default jam jika tidak ditemukan di DB atau kelasId null
+    const String defaultJamMasuk = "07:00:00";
+    const String defaultJamPulang = "16:00:00"; // BARU: Default jam pulang
+    String jamMasukKelasStr = defaultJamMasuk;
+    String jamPulangKelasStr = defaultJamPulang; // BARU
+
+    // Ambil jam masuk dan jam pulang dari tabel kelas jika kelasId ada
+    if (kelasId != null) {
+      try {
+        final kelasRes = await supabase
+            .from('kelas')
+            .select('jam_masuk, jam_pulang') // BARU: Ambil jam_pulang juga
+            .eq('id', kelasId)
+            .single();
+
+        jamMasukKelasStr =
+            (kelasRes['jam_masuk'] as String?) ?? defaultJamMasuk;
+        jamPulangKelasStr =
+            (kelasRes['jam_pulang'] as String?) ?? defaultJamPulang; // BARU
+      } catch (e) {
+        print("Error cari jam masuk/pulang kelas: $e. Menggunakan default.");
+        // Jika terjadi error, tetap gunakan default
+      }
+    }
+
     final existingList = await supabase
         .from('absensi')
         .select()
@@ -64,27 +94,45 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
         .eq('tanggal', today);
 
     if (existingList.isEmpty) {
-      // Belum absen hari ini -> masukkan waktu_masuk
+      // Logika Absensi MASUK (tetap sama)
+      final tglHariIniStr = DateFormat('yyyy-MM-dd').format(now);
+      final batasWaktuMasuk = DateTime.parse(
+        "$tglHariIniStr $jamMasukKelasStr",
+      );
+
+      String statusAbsen = now.isAfter(batasWaktuMasuk) ? 'terlambat' : 'hadir';
+
       await supabase.from('absensi').insert({
         'siswa_id': siswaId,
         'tanggal': today,
-        'status': 'hadir',
-        'waktu_masuk': now.toIso8601String().substring(11, 19),
+        'status': statusAbsen,
+        'waktu_masuk': jamScanStr,
       });
 
-      await _showPopup('✅ Absensi masuk tercatat\n$namaSiswa');
+      if (mounted) setState(() => _borderColor = Colors.greenAccent);
+      if (statusAbsen == 'terlambat') {
+        await _showPopup(
+          '⏱️ Anda TERLAMBAT ($jamScanStr)\n$namaSiswa',
+          color: Colors.orange,
+        );
+      } else {
+        await _showPopup('✅ Absensi masuk tercatat ($jamScanStr)\n$namaSiswa');
+      }
     } else {
-      // Sudah absen -> cek waktu pulang
+      // Logika Absensi PULANG (DIUBAH)
       final existing = existingList.first;
-      final waktuPulang = existing['waktu_pulang'];
+      final waktuPulangTercatat = existing['waktu_pulang'];
       final waktuMasukStr = existing['waktu_masuk'];
 
-      if (waktuPulang != null) {
-        await _showPopup('⚠️ Sudah tercatat waktu pulang sebelumnya', color: Colors.orange);
+      if (waktuPulangTercatat != null) {
+        await _showPopup(
+          '⚠️ Sudah tercatat waktu pulang sebelumnya',
+          color: Colors.orange,
+        );
         return;
       }
 
-      // Cek delay minimal 5 menit dari waktu_masuk
+      // Cek delay minimal 5 menit dari waktu_masuk (tetap ada)
       if (waktuMasukStr != null) {
         final waktuMasukToday = DateTime.parse("$today $waktuMasukStr");
         final durasi = now.difference(waktuMasukToday);
@@ -98,13 +146,34 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
         }
       }
 
-      // Update waktu_pulang jika delay terpenuhi
+      // --- BARU: LOGIKA CEK JAM PULANG RESMI ---
+      final tglHariIniStr = DateFormat('yyyy-MM-dd').format(now);
+      final batasWaktuPulang = DateTime.parse(
+        "$tglHariIniStr $jamPulangKelasStr",
+      );
+
+      // Jika waktu sekarang (now) sebelum jam pulang yang ditentukan
+      if (now.isBefore(batasWaktuPulang)) {
+        if (mounted) setState(() => _borderColor = Colors.orange);
+        await _showPopup(
+          '🚫 Belum waktunya pulang. Jam pulang: ${jamPulangKelasStr.substring(0, 5)}',
+          color: Colors.orange,
+        );
+        return; // Hentikan proses
+      }
+      // --- AKHIR LOGIKA BARU ---
+
+      // Jika sudah melewati atau pas jam pulang, baru update status "pulang"
       await supabase
           .from('absensi')
-          .update({'waktu_pulang': now.toIso8601String().substring(11, 19)})
+          .update({
+            'waktu_pulang': jamScanStr, // Waktu scan saat ini
+            'status': 'pulang', // BARU: Tambahkan status pulang
+          })
           .eq('id', existing['id']);
 
-      await _showPopup('🏁 Waktu pulang tercatat\n$namaSiswa');
+      if (mounted) setState(() => _borderColor = Colors.greenAccent);
+      await _showPopup('🏁 Absensi PULANG tercatat ($jamScanStr)\n$namaSiswa');
     }
   }
 
@@ -112,128 +181,66 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
     if (_isProcessing) return;
 
     final now = DateTime.now();
-    if (result == _lastScan && now.difference(_lastScanTime).inMilliseconds < 1200) {
+    if (result == _lastScan &&
+        now.difference(_lastScanTime).inMilliseconds < 1200) {
       return;
     }
 
     _lastScan = result;
     _lastScanTime = now;
 
-    setState(() => _isProcessing = true);
+    setState(() {
+      _isProcessing = true;
+      _borderColor = Colors.blueAccent;
+    });
 
     try {
-      final Map<String, dynamic> qrData = jsonDecode(result);
-      final int? siswaId = qrData['siswa_id'] as int?;
-      final String? namaSiswa = qrData['nama'] as String?;
-      final String? tipeData = qrData['tipe_data'] as String?;
+      final siswaRes = await supabase
+          .from('siswa')
+          .select('id, nama, kelas_id')
+          .eq('nis', result)
+          .single();
 
-      if (tipeData != 'ABSENSI' || siswaId == null || namaSiswa == null) {
-        throw Exception('QR tidak valid atau data tidak lengkap');
+      final int? siswaId = siswaRes['id'] as int?;
+      final String? namaSiswa = siswaRes['nama'] as String?;
+      final int? kelasId = siswaRes['kelas_id'] as int?;
+
+      if (siswaId == null || namaSiswa == null) {
+        throw Exception('Data siswa tidak lengkap di database');
       }
 
-      await _prosesAbsensi(siswaId, namaSiswa);
+      await _prosesAbsensi(siswaId, namaSiswa, kelasId);
     } catch (e) {
       String msg = '❌ Gagal absensi';
-      if (e is PostgrestException && e.code == '23505') {
-        msg = '⚠️ Siswa sudah absen hari ini';
+      if (e is PostgrestException) {
+        if (e.code == 'PGRST116') {
+          msg = '❌ QR tidak valid\nSiswa tidak ditemukan';
+        } else if (e.code == '23505') {
+          // Kasus ini mungkin tidak terjadi lagi karena ada pengecekan waktu pulang
+          msg = '⚠️ Siswa sudah absen masuk hari ini';
+        }
       } else if (e is FormatException) {
         msg = '❌ Format QR tidak valid';
+      } else {
+        msg = '❌ QR tidak dikenal';
+        print(e.toString());
       }
 
+      if (mounted) setState(() => _borderColor = Colors.red);
       await _showPopup(msg, color: Colors.red);
     } finally {
-      await Future.delayed(const Duration(milliseconds: 300));
-      if (mounted) setState(() => _isProcessing = false);
+      await Future.delayed(const Duration(milliseconds: 800));
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _borderColor = Colors.red;
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final scanBoxSize = size.width * 0.8;
-
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          // Kamera fullscreen
-          MobileScanner(
-            controller: MobileScannerController(
-              detectionSpeed: DetectionSpeed.normal,
-              torchEnabled: false,
-              returnImage: false,
-            ),
-            onDetect: (capture) {
-              final barcode = capture.barcodes.first.rawValue;
-              if (barcode != null) _handleScan(barcode);
-            },
-          ),
-
-          // Overlay luar border
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final top = (constraints.maxHeight - scanBoxSize) / 2;
-              final left = (constraints.maxWidth - scanBoxSize) / 2;
-              return Stack(
-                children: [
-                  Positioned(top: 0, left: 0, right: 0, height: top, child: Container(color: Colors.black.withOpacity(0.5))),
-                  Positioned(bottom: 0, left: 0, right: 0, height: top, child: Container(color: Colors.black.withOpacity(0.5))),
-                  Positioned(top: top, bottom: top, left: 0, width: left, child: Container(color: Colors.black.withOpacity(0.5))),
-                  Positioned(top: top, bottom: top, right: 0, width: left, child: Container(color: Colors.black.withOpacity(0.5))),
-                ],
-              );
-            },
-          ),
-
-          // Kotak area scan
-          Center(
-            child: Container(
-              width: scanBoxSize,
-              height: scanBoxSize,
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.greenAccent, width: 4),
-                borderRadius: BorderRadius.circular(20),
-                color: Colors.transparent,
-              ),
-            ),
-          ),
-
-          // Tombol close
-          SafeArea(
-            child: Align(
-              alignment: Alignment.topRight,
-              child: IconButton(
-                icon: const Icon(Icons.close, color: Colors.white, size: 32),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ),
-          ),
-
-          // Petunjuk teks
-          Positioned(
-            bottom: 60,
-            left: 0,
-            right: 0,
-            child: Text(
-              '📷 Arahkan QR ke dalam kotak\nScanner aktif terus.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 18,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-
-          // Overlay processing
-          if (_isProcessing)
-            Container(
-              color: Colors.black.withOpacity(0.4),
-              alignment: Alignment.center,
-              child: const CircularProgressIndicator(color: Colors.green),
-            ),
-        ],
-      ),
-    );
+    return BarcodeScannerPage(onResult: _handleScan, borderColor: _borderColor);
   }
 }

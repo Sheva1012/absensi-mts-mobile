@@ -1,10 +1,9 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // Import halaman-halaman yang benar
 import 'formLogin.dart';
-import 'scanner.dart';
+import 'scanner_dialog.dart'; 
 
 final SupabaseClient supabase = Supabase.instance.client;
 
@@ -27,96 +26,22 @@ class _ScanDashboardScreenState extends State<ScanDashboardScreen> {
     }
   }
 
-  /// Membuka halaman scanner fullscreen dan menunggu hasilnya
+  /// PERBAIKAN: Fungsi ini sekarang hanya membuka halaman scanner
+  /// Logika pemrosesan scan ada di dalam ContinuousScannerDialog
   void _openScanner() {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => BarcodeScannerPage(
-          // Kirim fungsi callback yang akan dijalankan setelah scan berhasil
-          onResult: (scannedValue) {
-            // Kembali ke halaman ini dulu
-            Navigator.pop(context); 
-            // Kemudian proses hasilnya
-            _handleScanResult(scannedValue);
-          },
-        ),
+        fullscreenDialog: true,
+        builder: (context) =>
+            const ContinuousScannerDialog(), // <-- Memanggil scanner yang benar
       ),
     );
   }
 
-  /// Memproses hasil yang didapat dari scanner
-  Future<void> _handleScanResult(String result) async {
-    try {
-      final Map<String, dynamic> qrData = jsonDecode(result);
-      final int? siswaId = qrData['siswa_id'] as int?;
-      final String? namaSiswa = qrData['nama'] as String?;
-      final String? tipeData = qrData['tipe_data'] as String?;
-
-      if (tipeData != 'ABSENSI' || siswaId == null || namaSiswa == null) {
-        throw Exception('QR tidak valid atau data tidak lengkap');
-      }
-
-      await _prosesAbsensi(siswaId, namaSiswa);
-    } catch (e) {
-      String msg = 'Gagal memproses absensi';
-      if (e is FormatException) {
-        msg = 'Format QR tidak valid';
-      } else {
-        msg = e.toString().replaceFirst("Exception: ", "");
-      }
-      _showPopup(msg, color: Colors.red);
-    }
-  }
-
-  /// Logika untuk menyimpan data absensi ke Supabase
-  Future<void> _prosesAbsensi(int siswaId, String namaSiswa) async {
-    final today = DateTime.now().toIso8601String().substring(0, 10);
-    final now = DateTime.now();
-
-    final existingList = await supabase
-        .from('absensi')
-        .select()
-        .eq('siswa_id', siswaId)
-        .eq('tanggal', today);
-
-    if (existingList.isEmpty) {
-      // Belum ada absensi masuk -> insert baru
-      await supabase.from('absensi').insert({
-        'siswa_id': siswaId,
-        'tanggal': today,
-        'status': 'hadir', // Pastikan kolom 'status' diisi
-        'waktu_masuk': now.toIso8601String().substring(11, 19),
-      });
-      _showPopup('✅ Absensi masuk tercatat\n$namaSiswa');
-    } else {
-      // Sudah ada absensi masuk -> update waktu pulang
-      final existing = existingList.first;
-      if (existing['waktu_pulang'] != null) {
-        _showPopup('⚠️ Sudah tercatat waktu pulang sebelumnya', color: Colors.orange);
-        return;
-      }
-      
-      await supabase
-          .from('absensi')
-          .update({'waktu_pulang': now.toIso8601String().substring(11, 19)})
-          .eq('id', existing['id']);
-      _showPopup('🏁 Waktu pulang tercatat\n$namaSiswa');
-    }
-  }
-
-  /// Menampilkan popup notifikasi
-  Future<void> _showPopup(String message, {Color color = Colors.green}) async {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message, textAlign: TextAlign.center),
-        backgroundColor: color,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
-  }
+  // PERBAIKAN: Logika di bawah ini ( _handleScanResult, _prosesAbsensi, _showPopup )
+  // telah dihapus karena sudah ada di dalam file 'scanner_dialog.dart'.
+  // Ini mencegah duplikasi dan memperbaiki alur navigasi.
 
   @override
   Widget build(BuildContext context) {
@@ -152,7 +77,8 @@ class _ScanDashboardScreenState extends State<ScanDashboardScreen> {
               ),
               const SizedBox(height: 40),
               GestureDetector(
-                onTap: _openScanner,
+                onTap:
+                    _openScanner, // <-- Memanggil fungsi yang sudah diperbaiki
                 child: Container(
                   width: 180,
                   height: 180,
@@ -185,7 +111,11 @@ class _ScanDashboardScreenState extends State<ScanDashboardScreen> {
                     'assets/logoMts.png',
                     height: 70,
                     errorBuilder: (context, error, stackTrace) {
-                      return const Icon(Icons.school, size: 70, color: Colors.grey);
+                      return const Icon(
+                        Icons.school,
+                        size: 70,
+                        color: Colors.grey,
+                      );
                     },
                   ),
                   const SizedBox(height: 6),
@@ -203,4 +133,3 @@ class _ScanDashboardScreenState extends State<ScanDashboardScreen> {
     );
   }
 }
-

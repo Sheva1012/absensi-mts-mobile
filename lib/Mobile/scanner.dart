@@ -4,8 +4,9 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 class BarcodeScannerPage extends StatefulWidget {
   final void Function(String) onResult;
+  final Color borderColor;
 
-  const BarcodeScannerPage({super.key, required this.onResult});
+  const BarcodeScannerPage({super.key, required this.onResult, required this.borderColor});
 
   @override
   State<BarcodeScannerPage> createState() => _BarcodeScannerPageState();

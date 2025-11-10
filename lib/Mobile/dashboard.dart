@@ -44,7 +44,8 @@ class ClassSummary {
   final int sudahAbsen;
   final int belumAbsen;
   final int butuhValidasi;
-  final int tidakMasuk; // <-- TAMBAHKAN INI
+  final int tidakMasuk;
+  final int terlambat; // <-- BARU
 
   ClassSummary({
     required this.namaKelas,
@@ -52,7 +53,8 @@ class ClassSummary {
     required this.sudahAbsen,
     required this.belumAbsen,
     required this.butuhValidasi,
-    required this.tidakMasuk, // <-- TAMBAHKAN INI
+    required this.tidakMasuk,
+    required this.terlambat, // <-- BARU
   });
 }
 
@@ -71,7 +73,11 @@ class DashboardData {
   // Kalkulasi statistik cepat
   double get persentaseKehadiran {
     final totalSiswa = summaries.fold(0, (sum, item) => sum + item.totalSiswa);
-    final totalHadir = summaries.fold(0, (sum, item) => sum + item.sudahAbsen);
+    // MODIFIKASI: Hitung hadir + terlambat sebagai yang sudah absen
+    final totalHadir = summaries.fold(
+      0,
+      (sum, item) => sum + item.sudahAbsen + item.terlambat,
+    );
     if (totalSiswa == 0) return 0.0;
     return (totalHadir / totalSiswa) * 100;
   }
@@ -211,11 +217,10 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
           .select('id, nama_kelas')
           .inFilter('nama_kelas', namaKelasList);
 
-      // PERBAIKAN: Tambahkan null safety saat mapping ID
+      // --- PERBAIKAN 1: Filter null saat mengambil ID kelas ---
       final List<int> kelasIdList = kelasDataList
-          .map<int?>((e) => e['id'] as int?)
-          .where((id) => id != null)
-          .cast<int>()
+          .map<int?>((e) => e['id'] as int?) // Ambil sebagai int? (nullable)
+          .whereType<int>() // Hanya ambil yang non-null (memfilter null)
           .toList();
 
       if (kelasIdList.isEmpty) {
@@ -231,19 +236,15 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
           .select('id, kelas_id')
           .inFilter('kelas_id', kelasIdList);
 
-      // PERBAIKAN: Tambahkan null safety saat mapping ID
+      // --- PERBAIKAN 2: Filter null saat mengambil SEMUA ID siswa ---
       final List<int> allSiswaIds = allSiswaList
-          .map<int?>((s) => s['id'] as int?)
-          .where((id) => id != null)
-          .cast<int>()
+          .map<int?>((s) => s['id'] as int?) // Ambil sebagai int?
+          .whereType<int>() // Filter null
           .toList();
 
       if (allSiswaIds.isEmpty) {
-        return DashboardData(
-          summaries: [],
-          totalSiswaAlfa: 0,
-          totalButuhValidasi: 0,
-        );
+        // Bisa jadi tidak ada siswa, tapi tetap lanjutkan untuk absensi (jika ada)
+        print("Tidak ada siswa yang ditemukan untuk kelas yang diampu.");
       }
 
       final today = DateTime.now();
@@ -258,25 +259,30 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
         today.day + 1,
       ).toIso8601String();
 
-      final List<Map<String, dynamic>> allAbsensiList = await _supabase
-          .from('absensi')
-          .select('siswa_id, status')
-          .inFilter('siswa_id', allSiswaIds)
-          .gte('created_at', todayStart)
-          .lt('created_at', tomorrowStart);
+      // Hanya query absensi jika ada siswa
+      final List<Map<String, dynamic>> allAbsensiList = allSiswaIds.isEmpty
+          ? []
+          : await _supabase
+                .from('absensi')
+                .select('siswa_id, status')
+                .inFilter('siswa_id', allSiswaIds)
+                .gte('created_at', todayStart)
+                .lt('created_at', tomorrowStart);
 
-      final List<Map<String, dynamic>> allSuratList = await _supabase
-          .from('surat')
-          .select('siswa_id, file_url')
-          .inFilter('siswa_id', allSiswaIds)
-          .gte('created_at', todayStart)
-          .lt('created_at', tomorrowStart);
+      // Hanya query surat jika ada siswa
+      final List<Map<String, dynamic>> allSuratList = allSiswaIds.isEmpty
+          ? []
+          : await _supabase
+                .from('surat')
+                .select('siswa_id, file_url')
+                .inFilter('siswa_id', allSiswaIds)
+                .gte('created_at', todayStart)
+                .lt('created_at', tomorrowStart);
 
-      // PERBAIKAN: Tambahkan null safety saat mapping ID
+      // --- PERBAIKAN 3: Filter null saat mengambil ID siswa dari surat ---
       final Set<int> siswaIdsWithSurat = allSuratList
-          .map<int?>((s) => s['siswa_id'] as int?)
-          .where((id) => id != null)
-          .cast<int>()
+          .map<int?>((s) => s['siswa_id'] as int?) // Ambil sebagai int?
+          .whereType<int>() // Filter null
           .toSet();
 
       final List<Map<String, dynamic>> absensiSakitIzin = allAbsensiList.where((
@@ -288,26 +294,40 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
 
       final List<Map<String, dynamic>> absensiButuhValidasi = absensiSakitIzin
           .where((a) {
-            return !siswaIdsWithSurat.contains(a['siswa_id']);
+            // --- PERBAIKAN 4: Cek null di siswa_id sebelum .contains ---
+            final siswaId = a['siswa_id'];
+            return siswaId != null && !siswaIdsWithSurat.contains(siswaId);
           })
           .toList();
 
       final totalButuhValidasi = absensiButuhValidasi.length;
 
       final summaries = kelasDataList.map((kelasData) {
+        // --- PERBAIKAN 5: Pastikan kelasId tidak null sebelum melanjutkan ---
         final kelasId = kelasData['id'];
-        final namaKelas = kelasData['nama_kelas'];
+        if (kelasId == null) {
+          return null; // Akan difilter nanti
+        }
 
+        final namaKelas = kelasData['nama_kelas'] ?? 'Tanpa Nama';
+
+        // --- PERBAIKAN 6: Filter null ID dan kelas_id saat memetakan siswa ---
+        // Ini adalah tempat error Anda sebelumnya
         final siswaIdsInThisClass = allSiswaList
-            .where((s) => s['kelas_id'] == kelasId)
-            .map<int>((s) => s['id'] as int)
+            .where(
+              (s) => s['kelas_id'] == kelasId && s['id'] != null,
+            ) // Pastikan id siswa tidak null
+            .map<int?>((s) => s['id'] as int?)
+            .whereType<int>() // Filter null secara eksplisit
             .toSet();
 
         final totalSiswa = siswaIdsInThisClass.length;
 
-        final absensiForThisClass = allAbsensiList
-            .where((a) => siswaIdsInThisClass.contains(a['siswa_id']))
-            .toList();
+        // --- PERBAIKAN 7: Cek null di 'siswa_id' sebelum .contains ---
+        final absensiForThisClass = allAbsensiList.where((a) {
+          final siswaId = a['siswa_id'];
+          return siswaId != null && siswaIdsInThisClass.contains(siswaId);
+        }).toList();
 
         final sudahAbsen = absensiForThisClass
             .where(
@@ -315,11 +335,20 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
             )
             .length;
 
+        final terlambat = absensiForThisClass
+            .where(
+              (a) =>
+                  a['status']?.toString().trim().toLowerCase() == 'terlambat',
+            )
+            .length;
+
         final belumAbsen = totalSiswa - absensiForThisClass.length;
 
-        final butuhValidasi = absensiButuhValidasi
-            .where((a) => siswaIdsInThisClass.contains(a['siswa_id']))
-            .length;
+        // --- PERBAIKAN 8: Cek null di 'siswa_id' sebelum .contains ---
+        final butuhValidasi = absensiButuhValidasi.where((a) {
+          final siswaId = a['siswa_id'];
+          return siswaId != null && siswaIdsInThisClass.contains(siswaId);
+        }).length;
 
         final tidakMasuk = absensiForThisClass.where((a) {
           final status = a['status']?.toString().trim().toLowerCase();
@@ -330,23 +359,29 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
           namaKelas: namaKelas,
           totalSiswa: totalSiswa,
           sudahAbsen: sudahAbsen,
+          terlambat: terlambat,
           belumAbsen: belumAbsen,
           butuhValidasi: butuhValidasi,
           tidakMasuk: tidakMasuk,
         );
-      }).toList();
+      }).toList(); // Daftar ini sekarang berisi ClassSummary atau null
+
+      // --- PERBAIKAN 9: Filter semua 'null' yang mungkin dihasilkan dari perbaikan 5 ---
+      final nonNullSummaries = summaries.whereType<ClassSummary>().toList();
 
       final totalSiswaAlfa = allAbsensiList
           .where((a) => a['status']?.toString().trim().toLowerCase() == 'alfa')
           .length;
 
       return DashboardData(
-        summaries: summaries,
+        summaries: nonNullSummaries, // Gunakan daftar yang sudah bersih
         totalSiswaAlfa: totalSiswaAlfa,
         totalButuhValidasi: totalButuhValidasi,
       );
-    } catch (e) {
+    } catch (e, s) {
+      // Tambahkan 's' untuk Stack Trace
       print("Error fetching dashboard data: $e");
+      print("Stack trace: $s"); // Cetak stack trace untuk info lebih detail
       throw Exception("Gagal memuat data dashboard.");
     }
   }
@@ -451,9 +486,7 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
                     "Tingkat Kehadiran",
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                   ),
-                  Text(
-                    "Persentase siswa yang hadir hari ini dari semua kelas.",
-                  ),
+                  Text("Persentase siswa yang hadir/terlambat hari ini."),
                 ],
               ),
             ),
@@ -531,19 +564,57 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
               style: TextStyle(color: Colors.grey[600]),
             ),
             const Divider(height: 24),
+
+            // --- MULAI PERUBAHAN: GANTI Wrap DENGAN Row + Column ---
             Row(
+              // Bagi jadi 3 kolom dengan spasi merata
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              // Ratakan semua kolom ke atas
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildStatItem("Hadir", summary.sudahAbsen, Colors.green),
-                _buildStatItem("Tidak Masuk", summary.tidakMasuk, Colors.red),
-                _buildStatItem(
-                  "Belum Absen",
-                  summary.belumAbsen,
-                  Colors.orange,
+                // Kolom 1 (2 item)
+                Column(
+                  children: [
+                    _buildStatItem("Hadir", summary.sudahAbsen, Colors.green),
+                    const SizedBox(height: 16), // Spasi antar item
+                    _buildStatItem(
+                      "Terlambat",
+                      summary.terlambat,
+                      Colors.purple,
+                    ),
+                  ],
                 ),
-                _buildStatItem("Validasi", summary.butuhValidasi, Colors.blue),
+
+                // Kolom 2 (2 item)
+                Column(
+                  children: [
+                    _buildStatItem(
+                      "Tidak Masuk",
+                      summary.tidakMasuk,
+                      Colors.red,
+                    ),
+                    const SizedBox(height: 16), // Spasi antar item
+                    _buildStatItem(
+                      "Belum Absen",
+                      summary.belumAbsen,
+                      Colors.orange,
+                    ),
+                  ],
+                ),
+
+                // Kolom 3 (1 item)
+                Column(
+                  children: [
+                    _buildStatItem(
+                      "Validasi",
+                      summary.butuhValidasi,
+                      Colors.blue,
+                    ),
+                  ],
+                ),
               ],
             ),
+            // --- AKHIR PERUBAHAN ---
           ],
         ),
       ),
@@ -567,7 +638,7 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
   }
 }
 
-// SIDEBAR (Tidak ada perubahan signifikan, hanya memastikan ada)
+// SIDEBAR (Tidak ada perubahan)
 class AppSidebar extends StatefulWidget {
   final TeacherProfile teacherProfile;
   const AppSidebar({super.key, required this.teacherProfile});

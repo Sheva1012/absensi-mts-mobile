@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:fluttertoast/fluttertoast.dart';
 
 import 'scanner.dart';
 
@@ -20,38 +21,20 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
   DateTime _lastScanTime = DateTime.now();
   Color _borderColor = Colors.red;
 
-  Future<void> _showPopup(String message, {Color color = Colors.green}) async {
+  // --- 2. FUNGSI DIGANTI MENGGUNAKAN FLUTTERTOAST ---
+  void _showToast(String message, {Color color = Colors.green}) {
     if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => Center(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          margin: const EdgeInsets.symmetric(horizontal: 40),
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(14),
-            boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 20),
-            ],
-          ),
-          child: DefaultTextStyle(
-            style: const TextStyle(
-              fontSize: 18,
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              decoration: TextDecoration.none,
-            ),
-            child: Text(message, textAlign: TextAlign.center),
-          ),
-        ),
-      ),
-    );
 
-    await Future.delayed(const Duration(seconds: 1));
-    if (mounted) Navigator.pop(context);
+    Fluttertoast.showToast(
+      msg: message,
+      toastLength: Toast.LENGTH_SHORT, // Durasi 1 detik
+      gravity: ToastGravity.CENTER, // Posisi di tengah, seperti popup Anda
+      backgroundColor: color,
+      textColor: Colors.white,
+      fontSize: 18.0, // Mirip dengan gaya teks Anda
+    );
   }
+  // --- AKHIR PERUBAHAN FUNGSI ---
 
   Future<void> _prosesAbsensi(
     int siswaId,
@@ -64,9 +47,9 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
 
     // Default jam jika tidak ditemukan di DB atau kelasId null
     const String defaultJamMasuk = "07:00:00";
-    const String defaultJamPulang = "16:00:00"; // BARU: Default jam pulang
+    const String defaultJamPulang = "14:00:00";
     String jamMasukKelasStr = defaultJamMasuk;
-    String jamPulangKelasStr = defaultJamPulang; // BARU
+    String jamPulangKelasStr = defaultJamPulang;
 
     // Ambil jam masuk dan jam pulang dari tabel kelas jika kelasId ada
     if (kelasId != null) {
@@ -111,12 +94,14 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
 
       if (mounted) setState(() => _borderColor = Colors.greenAccent);
       if (statusAbsen == 'terlambat') {
-        await _showPopup(
+        // --- 3. DIUBAH: HAPUS AWAIT & GANTI NAMA FUNGSI ---
+        _showToast(
           '⏱️ Anda TERLAMBAT ($jamScanStr)\n$namaSiswa',
           color: Colors.orange,
         );
       } else {
-        await _showPopup('✅ Absensi masuk tercatat ($jamScanStr)\n$namaSiswa');
+        // --- 3. DIUBAH: HAPUS AWAIT & GANTI NAMA FUNGSI ---
+        _showToast('✅ Absensi masuk tercatat ($jamScanStr)\n$namaSiswa');
       }
     } else {
       // Logika Absensi PULANG (DIUBAH)
@@ -125,7 +110,8 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
       final waktuMasukStr = existing['waktu_masuk'];
 
       if (waktuPulangTercatat != null) {
-        await _showPopup(
+        // --- 3. DIUBAH: HAPUS AWAIT & GANTI NAMA FUNGSI ---
+        _showToast(
           '⚠️ Sudah tercatat waktu pulang sebelumnya',
           color: Colors.orange,
         );
@@ -138,7 +124,8 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
         final durasi = now.difference(waktuMasukToday);
 
         if (durasi.inMinutes < 5) {
-          await _showPopup(
+          // --- 3. DIUBAH: HAPUS AWAIT & GANTI NAMA FUNGSI ---
+          _showToast(
             '⏱️ Belum bisa absen pulang.\nTunggu ${5 - durasi.inMinutes} menit lagi.',
             color: Colors.orange,
           );
@@ -155,7 +142,8 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
       // Jika waktu sekarang (now) sebelum jam pulang yang ditentukan
       if (now.isBefore(batasWaktuPulang)) {
         if (mounted) setState(() => _borderColor = Colors.orange);
-        await _showPopup(
+        // --- 3. DIUBAH: HAPUS AWAIT & GANTI NAMA FUNGSI ---
+        _showToast(
           '🚫 Belum waktunya pulang. Jam pulang: ${jamPulangKelasStr.substring(0, 5)}',
           color: Colors.orange,
         );
@@ -173,7 +161,8 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
           .eq('id', existing['id']);
 
       if (mounted) setState(() => _borderColor = Colors.greenAccent);
-      await _showPopup('🏁 Absensi PULANG tercatat ($jamScanStr)\n$namaSiswa');
+      // --- 3. DIUBAH: HAPUS AWAIT & GANTI NAMA FUNGSI ---
+      _showToast('🏁 Absensi PULANG tercatat ($jamScanStr)\n$namaSiswa');
     }
   }
 
@@ -227,7 +216,8 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
       }
 
       if (mounted) setState(() => _borderColor = Colors.red);
-      await _showPopup(msg, color: Colors.red);
+      // --- 3. DIUBAH: HAPUS AWAIT & GANTI NAMA FUNGSI ---
+      _showToast(msg, color: Colors.red);
     } finally {
       await Future.delayed(const Duration(milliseconds: 800));
       if (mounted) {

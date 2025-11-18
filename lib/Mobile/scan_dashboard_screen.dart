@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// Import halaman login & scanner
+// Import halaman-halaman yang benar
 import 'formLogin.dart';
-import 'scanner_dialog.dart';
+import 'scanner_dialog.dart'; 
 
 final SupabaseClient supabase = Supabase.instance.client;
 
@@ -26,16 +26,22 @@ class _ScanDashboardScreenState extends State<ScanDashboardScreen> {
     }
   }
 
-  /// ✅ BUKAN showDialog lagi — pakai Navigator.push untuk fullscreen scanner
-  void _openScanner() async {
-    await Navigator.push(
+  /// PERBAIKAN: Fungsi ini sekarang hanya membuka halaman scanner
+  /// Logika pemrosesan scan ada di dalam ContinuousScannerDialog
+  void _openScanner() {
+    Navigator.push(
       context,
       MaterialPageRoute(
-        fullscreenDialog: true, // agar tampil dari bawah dan fullscreen
-        builder: (context) => const ContinuousScannerDialog(),
+        fullscreenDialog: true,
+        builder: (context) =>
+            const ContinuousScannerDialog(), // <-- Memanggil scanner yang benar
       ),
     );
   }
+
+  // PERBAIKAN: Logika di bawah ini ( _handleScanResult, _prosesAbsensi, _showPopup )
+  // telah dihapus karena sudah ada di dalam file 'scanner_dialog.dart'.
+  // Ini mencegah duplikasi dan memperbaiki alur navigasi.
 
   @override
   Widget build(BuildContext context) {
@@ -70,21 +76,16 @@ class _ScanDashboardScreenState extends State<ScanDashboardScreen> {
                 ),
               ),
               const SizedBox(height: 40),
-
-              // Tombol Scan
               GestureDetector(
-                onTap: _openScanner, // ganti dari _showScannerDialog ke _openScanner
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 300),
+                onTap:
+                    _openScanner, // <-- Memanggil fungsi yang sudah diperbaiki
+                child: Container(
                   width: 180,
                   height: 180,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: Colors.white,
-                    border: Border.all(
-                      color: Colors.grey.shade300,
-                      width: 2,
-                    ),
+                    border: Border.all(color: Colors.grey.shade300, width: 2),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withOpacity(0.08),
@@ -102,30 +103,27 @@ class _ScanDashboardScreenState extends State<ScanDashboardScreen> {
                   ),
                 ),
               ),
-
-              const SizedBox(height: 40),
-              const Spacer(),
-
-              // Footer
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Image.asset(
-                      'assets/logoMts.png',
-                      height: 70,
-                      errorBuilder: (context, error, stackTrace) {
-                        return const Icon(Icons.school, size: 70, color: Colors.grey);
-                      },
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      "MTS Sunan Gunung Jati",
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                    ),
-                  ],
-                ),
+              const Spacer(flex: 2),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Image.asset(
+                    'assets/logoMts.png',
+                    height: 70,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const Icon(
+                        Icons.school,
+                        size: 70,
+                        color: Colors.grey,
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    "MTS Sunan Gunung Jati",
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                ],
               ),
               const SizedBox(height: 20),
             ],

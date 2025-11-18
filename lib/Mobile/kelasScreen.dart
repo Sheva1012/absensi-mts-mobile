@@ -3,12 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'editSiswa.dart';
 
-/// =======================
-/// MODEL DATA (DIPERBARUI)
-/// =======================
-
 class Absensi {
-  final String status; // 'Hadir', 'Sakit', 'Izin', 'Alfa'
+  final String status; // 'Hadir', 'Sakit', 'Izin', 'Alfa', 'Terlambat'
   final String? tanggal;
   final String? fileUrlSurat;
   final String? jenisSurat;
@@ -219,6 +215,7 @@ class _KelasScreenState extends State<KelasScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: Text(widget.namaKelas),
         centerTitle: true,
@@ -314,12 +311,17 @@ class _KelasScreenState extends State<KelasScreen> {
   }
 
   Widget _buildTableRow(Siswa siswa) {
+    // --- BARU: Cek apakah status siswa 'Terlambat' ---
+    final bool isTerlambat =
+        siswa.absensiHariIni.status.toLowerCase() == 'terlambat';
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Row(
         children: [
           _TableCell(siswa.no.toString(), flex: 1),
           _TableCell(siswa.nama, flex: 3, isName: true),
+          // Kolom ini akan otomatis menampilkan "Terlambat" jika itu statusnya
           _TableCell(siswa.absensiHariIni.status, flex: 3),
           Expanded(
             flex: 2,
@@ -328,6 +330,9 @@ class _KelasScreenState extends State<KelasScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.blue,
                   foregroundColor: Colors.white,
+                  // --- BARU: Beri warna berbeda jika tombol nonaktif ---
+                  disabledBackgroundColor: Colors.grey.shade300,
+                  disabledForegroundColor: Colors.grey.shade600,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(20),
                   ),
@@ -336,7 +341,8 @@ class _KelasScreenState extends State<KelasScreen> {
                     vertical: 8,
                   ),
                 ),
-                onPressed: () => _navigateToEdit(siswa),
+                // --- DIUBAH: Set 'onPressed' menjadi null jika terlambat ---
+                onPressed: isTerlambat ? null : () => _navigateToEdit(siswa),
                 child: const Text('Edit'),
               ),
             ),

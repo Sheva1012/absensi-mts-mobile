@@ -216,12 +216,7 @@ class _KelasScreenState extends State<KelasScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       resizeToAvoidBottomInset: false,
-      appBar: AppBar(
-        title: Text(widget.namaKelas),
-        centerTitle: true,
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
-      ),
+      appBar: null,
       body: SafeArea(
         child: Column(
           children: [

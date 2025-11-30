@@ -4,7 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'editSiswa.dart';
 
 class Absensi {
-  final String status; // 'Hadir', 'Sakit', 'Izin', 'Alfa', 'Terlambat'
+  final String status;
   final String? tanggal;
   final String? fileUrlSurat;
   final String? jenisSurat;
@@ -89,6 +89,9 @@ class KelasScreen extends StatefulWidget {
 class _KelasScreenState extends State<KelasScreen> {
   final _supabase = Supabase.instance.client;
   final _searchController = TextEditingController();
+  
+  // 2. Tambahkan variabel Timer untuk auto refresh
+  Timer? _autoRefreshTimer; 
   Timer? _debounce;
 
   List<Siswa> _originalSiswaList = [];
@@ -100,7 +103,11 @@ class _KelasScreenState extends State<KelasScreen> {
   @override
   void initState() {
     super.initState();
-    _fetchData();
+    _fetchData(); // Fetch pertama kali (pakai loading)
+    
+    // 3. Jalankan Auto Refresh setiap 5 detik
+    _startAutoRefresh();
+
     _searchController.addListener(_filterSiswa);
   }
 
@@ -109,7 +116,19 @@ class _KelasScreenState extends State<KelasScreen> {
     _searchController.removeListener(_filterSiswa);
     _searchController.dispose();
     _debounce?.cancel();
+    
+    // 4. PENTING: Matikan timer saat keluar layar agar tidak memakan memori
+    _autoRefreshTimer?.cancel(); 
+    
     super.dispose();
+  }
+
+  // Fungsi untuk memulai timer
+  void _startAutoRefresh() {
+    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      // Panggil fetch data dengan mode 'background' (tanpa loading spinner)
+      _fetchData(isBackground: true);
+    });
   }
 
   void _filterSiswa() {
@@ -126,11 +145,17 @@ class _KelasScreenState extends State<KelasScreen> {
   }
 
   /// ✅ Ambil semua siswa + absensi + surat
-  Future<void> _fetchData() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+  /// Tambahkan parameter [isBackground] untuk silent refresh
+  Future<void> _fetchData({bool isBackground = false}) async {
+    if (!mounted) return;
+
+    // Hanya tampilkan loading spinner jika BUKAN background refresh
+    if (!isBackground) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
 
     try {
       final kelasResponse = await _supabase
@@ -147,7 +172,6 @@ class _KelasScreenState extends State<KelasScreen> {
 
       final kelasId = kelasResponse['id'];
 
-      // Ambil data absensi dan surat dengan kolom yang benar
       final data = await _supabase
           .from('siswa')
           .select(
@@ -158,30 +182,51 @@ class _KelasScreenState extends State<KelasScreen> {
 
       if (!mounted) return;
 
-      setState(() {
-        _originalSiswaList = (data as List<dynamic>)
+      final newList = (data as List<dynamic>)
             .map((item) => Siswa.fromJson(item))
             .toList();
-        _filteredSiswaList = _originalSiswaList;
+
+      setState(() {
+        _originalSiswaList = newList;
+        
+        // 5. Logic agar pencarian tidak ter-reset saat auto refresh
+        if (_searchController.text.isNotEmpty) {
+          _filterSiswa(); // Terapkan ulang filter jika ada teks pencarian
+        } else {
+          _filteredSiswaList = _originalSiswaList;
+        }
       });
+      
     } catch (e) {
       if (!mounted) return;
-      print("!!! ERROR saat fetchData: $e");
-      setState(
-        () => _errorMessage = e.toString().replaceFirst("Exception: ", ""),
-      );
+      // Jika background refresh gagal, jangan ganggu user dengan error screen penuh,
+      // cukup print di console saja.
+      if (isBackground) {
+        debugPrint("Background refresh error: $e");
+      } else {
+        setState(
+          () => _errorMessage = e.toString().replaceFirst("Exception: ", ""),
+        );
+      }
     } finally {
       if (!mounted) return;
-      setState(() => _isLoading = false);
+      // Matikan loading hanya jika bukan background process
+      if (!isBackground) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
   Future<void> _handleRefresh() async {
     _searchController.clear();
-    await _fetchData();
+    // Manual refresh: Tampilkan loading
+    await _fetchData(isBackground: false); 
   }
 
   void _navigateToEdit(Siswa siswa) {
+    // Matikan auto refresh sementara saat pindah halaman
+    _autoRefreshTimer?.cancel();
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -189,13 +234,16 @@ class _KelasScreenState extends State<KelasScreen> {
           id: siswa.id,
           no: siswa.no.toString(),
           nama: siswa.nama,
-          // status: siswa.absensiHariIni.status,  // HAPUS BARIS INI
           suratUrl: siswa.suratUrlHariIni,
         ),
       ),
     ).then((isSuccess) {
+      // Nyalakan lagi auto refresh saat kembali
+      _startAutoRefresh();
+
       if (isSuccess == true) {
-        _handleRefresh();
+        // Refresh langsung agar update terlihat instan
+        _handleRefresh(); 
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(
@@ -209,7 +257,7 @@ class _KelasScreenState extends State<KelasScreen> {
   }
 
   /// =======================
-  /// UI SECTION
+  /// UI SECTION (Tidak Ada Perubahan Besar)
   /// =======================
 
   @override
@@ -306,7 +354,6 @@ class _KelasScreenState extends State<KelasScreen> {
   }
 
   Widget _buildTableRow(Siswa siswa) {
-    // --- BARU: Cek apakah status siswa 'Terlambat' ---
     final bool isTerlambat =
         siswa.absensiHariIni.status.toLowerCase() == 'terlambat';
 
@@ -316,7 +363,6 @@ class _KelasScreenState extends State<KelasScreen> {
         children: [
           _TableCell(siswa.no.toString(), flex: 1),
           _TableCell(siswa.nama, flex: 3, isName: true),
-          // Kolom ini akan otomatis menampilkan "Terlambat" jika itu statusnya
           _TableCell(siswa.absensiHariIni.status, flex: 3),
           Expanded(
             flex: 2,
@@ -325,7 +371,6 @@ class _KelasScreenState extends State<KelasScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.blue,
                   foregroundColor: Colors.white,
-                  // --- BARU: Beri warna berbeda jika tombol nonaktif ---
                   disabledBackgroundColor: Colors.grey.shade300,
                   disabledForegroundColor: Colors.grey.shade600,
                   shape: RoundedRectangleBorder(
@@ -336,7 +381,6 @@ class _KelasScreenState extends State<KelasScreen> {
                     vertical: 8,
                   ),
                 ),
-                // --- DIUBAH: Set 'onPressed' menjadi null jika terlambat ---
                 onPressed: isTerlambat ? null : () => _navigateToEdit(siswa),
                 child: const Text('Edit'),
               ),

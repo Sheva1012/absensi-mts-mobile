@@ -37,6 +37,10 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
     super.initState();
     // Gunakan nilai dari widget, default ke 'Alfa' jika null
     selectedKeterangan = widget.keterangan ?? 'Alfa';
+
+    if (selectedKeterangan != null) {
+      selectedKeterangan = selectedKeterangan![0].toUpperCase() + selectedKeterangan!.substring(1).toLowerCase();
+    }
   }
 
   Future<void> _pickFile(ImageSource source) async {

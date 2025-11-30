@@ -329,35 +329,50 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
               return siswaDalamKelas.contains(a['siswa_id']);
             }).toList();
 
+            // 1. Hitung Hadir
             final hadir = absensiKelas
                 .where((a) => a['status'].toString().toLowerCase() == 'hadir')
                 .length;
 
+            // 2. Hitung Terlambat
             final terlambat = absensiKelas
                 .where(
                   (a) => a['status'].toString().toLowerCase() == 'terlambat',
                 )
                 .length;
 
+            // 3. Hitung Tidak Masuk (Hanya Sakit & Izin)
+            // 'Alfa' kita pindahkan ke kategori 'Belum Absen' karena itu default sistem
             final tidakMasuk = absensiKelas.where((a) {
               final st = a['status'].toString().toLowerCase();
-              return st == 'sakit' || st == 'izin' || st == 'alfa';
+              return st == 'sakit' || st == 'izin';
             }).length;
 
-            final belumAbsen = totalSiswa - absensiKelas.length;
+            // 4. Hitung Belum Absen (LOGIKA BARU)
+            // Belum Absen = (Siswa yg belum punya row data sama sekali) + (Siswa dengan status 'alfa')
+            final rowCount = absensiKelas.length;
+            final dataMissing =
+                totalSiswa - rowCount; // Siswa baru yg belum kena cron
+
+            final statusAlfa = absensiKelas
+                .where((a) => a['status'].toString().toLowerCase() == 'alfa')
+                .length;
+
+            final belumAbsen = dataMissing + statusAlfa;
 
             return ClassSummary(
               namaKelas: namaKelas,
               totalSiswa: totalSiswa,
               sudahAbsen: hadir,
               terlambat: terlambat,
-              belumAbsen: belumAbsen,
-              tidakMasuk: tidakMasuk,
+              belumAbsen: belumAbsen, // Alfa masuk sini
+              tidakMasuk: tidakMasuk, // Hanya Sakit/Izin
             );
           })
           .whereType<ClassSummary>()
           .toList();
 
+      // Total Alfa untuk data global (jika diperlukan)
       final totalAlfa = todayAbsensiList
           .where((a) => a['status'].toString().toLowerCase() == 'alfa')
           .length;
@@ -366,7 +381,6 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
     } catch (e, s) {
       debugPrint("Dashboard Error: $e");
       debugPrint(s.toString());
-      // Return empty data on error to prevent crash
       return DashboardData(summaries: [], totalSiswaAlfa: 0);
     }
   }

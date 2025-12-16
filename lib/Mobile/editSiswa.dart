@@ -114,10 +114,14 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
           ?.toLowerCase(); // hadir/izin/sakit/alfa
 
       // === 1) UPSERT ABSENSI ===
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) throw Exception('User belum login');
+
       await _supabase.from('absensi').upsert({
         'siswa_id': widget.id,
         'tanggal': tanggalOnly,
         'status': statusLower,
+        'updated_by': userId,
       }, onConflict: 'siswa_id, tanggal');
 
       // === 2) PROSES SURAT ===

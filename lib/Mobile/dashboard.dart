@@ -42,17 +42,21 @@ class ClassSummary {
   final String namaKelas;
   final int totalSiswa;
   final int sudahAbsen;
-  final int belumAbsen;
-  final int tidakMasuk;
   final int terlambat;
+  final int sakit;
+  final int izin;
+  final int alfa;
+  final int belumAbsen; // Data kosong (error/siswa baru)
 
   ClassSummary({
     required this.namaKelas,
     required this.totalSiswa,
     required this.sudahAbsen,
-    required this.belumAbsen,
-    required this.tidakMasuk,
     required this.terlambat,
+    required this.sakit,
+    required this.izin,
+    required this.alfa,
+    required this.belumAbsen,
   });
 }
 
@@ -317,6 +321,7 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
             final kelasId = kelas['id'];
             final namaKelas = kelas['nama_kelas'] ?? "-";
 
+            // Filter siswa
             final siswaDalamKelas = siswaList
                 .where((s) => s['kelas_id'] == kelasId)
                 .map<int?>((s) => s['id'])
@@ -325,54 +330,61 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
 
             final totalSiswa = siswaDalamKelas.length;
 
+            // Filter absensi
             final absensiKelas = todayAbsensiList.where((a) {
               return siswaDalamKelas.contains(a['siswa_id']);
             }).toList();
 
-            // 1. Hitung Hadir
+            // --- LOGIC EKSPLISIT PER STATUS ---
+
+            // 1. Hadir
             final hadir = absensiKelas
                 .where((a) => a['status'].toString().toLowerCase() == 'hadir')
                 .length;
 
-            // 2. Hitung Terlambat
+            // 2. Terlambat
             final terlambat = absensiKelas
                 .where(
                   (a) => a['status'].toString().toLowerCase() == 'terlambat',
                 )
                 .length;
 
-            // 3. Hitung Tidak Masuk (Hanya Sakit & Izin)
-            // 'Alfa' kita pindahkan ke kategori 'Belum Absen' karena itu default sistem
-            final tidakMasuk = absensiKelas.where((a) {
-              final st = a['status'].toString().toLowerCase();
-              return st == 'sakit' || st == 'izin';
-            }).length;
+            // 3. Sakit
+            final sakit = absensiKelas
+                .where((a) => a['status'].toString().toLowerCase() == 'sakit')
+                .length;
 
-            // 4. Hitung Belum Absen (LOGIKA BARU)
-            // Belum Absen = (Siswa yg belum punya row data sama sekali) + (Siswa dengan status 'alfa')
-            final rowCount = absensiKelas.length;
-            final dataMissing =
-                totalSiswa - rowCount; // Siswa baru yg belum kena cron
+            // 4. Izin
+            final izin = absensiKelas
+                .where((a) => a['status'].toString().toLowerCase() == 'izin')
+                .length;
 
-            final statusAlfa = absensiKelas
+            // 5. Alfa
+            // Karena digenerate otomatis, Alfa akan tinggi di pagi hari
+            final alfa = absensiKelas
                 .where((a) => a['status'].toString().toLowerCase() == 'alfa')
                 .length;
 
-            final belumAbsen = dataMissing + statusAlfa;
+            // 6. Belum Absen (Data Kosong / Error Cron)
+            // Harusnya 0 jika sistem normal
+            final rowCount = absensiKelas.length;
+            final belumAbsen = totalSiswa - rowCount;
 
             return ClassSummary(
               namaKelas: namaKelas,
               totalSiswa: totalSiswa,
               sudahAbsen: hadir,
               terlambat: terlambat,
-              belumAbsen: belumAbsen, // Alfa masuk sini
-              tidakMasuk: tidakMasuk, // Hanya Sakit/Izin
+              sakit: sakit, // Eksplisit
+              izin: izin, // Eksplisit
+              alfa: alfa, // Eksplisit
+              belumAbsen: belumAbsen,
             );
           })
           .whereType<ClassSummary>()
           .toList();
 
-      // Total Alfa untuk data global (jika diperlukan)
+      // Hitung Total Alfa Global
       final totalAlfa = todayAbsensiList
           .where((a) => a['status'].toString().toLowerCase() == 'alfa')
           .length;
@@ -505,6 +517,7 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Header Card (Nama Kelas & Total)
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -515,20 +528,44 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                Chip(
-                  label: Text("Total: ${summary.totalSiswa}"),
-                  backgroundColor: Colors.grey[200],
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.blue.shade100),
+                  ),
+                  child: Text(
+                    "Total: ${summary.totalSiswa}",
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue.shade800,
+                    ),
+                  ),
                 ),
               ],
             ),
             const Divider(height: 24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+
+            // Grid Statistik (Menggunakan Wrap agar responsif)
+            Wrap(
+              spacing: 16, // Jarak horizontal antar item
+              runSpacing: 16, // Jarak vertikal jika turun ke baris baru
+              alignment: WrapAlignment.spaceAround,
               children: [
                 _stat("Hadir", summary.sudahAbsen, Colors.green),
-                _stat("Terlambat", summary.terlambat, Colors.purple),
-                _stat("Tidak Masuk", summary.tidakMasuk, Colors.red),
-                _stat("Belum Absen", summary.belumAbsen, Colors.orange),
+                _stat("Terlambat", summary.terlambat, Colors.teal),
+                _stat("Sakit", summary.sakit, Colors.blue),
+                _stat("Izin", summary.izin, Colors.orange),
+                _stat("Alfa", summary.alfa, Colors.red),
+
+                // Tampilkan 'Belum Absen' hanya jika ada (biar tidak memenuhi layar jika 0)
+                if (summary.belumAbsen > 0)
+                  _stat("No Data", summary.belumAbsen, Colors.grey),
               ],
             ),
           ],
@@ -537,8 +574,10 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
     );
   }
 
+  // Widget helper kecil untuk angka & label
   Widget _stat(String label, int count, Color color) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Text(
           count.toString(),
@@ -549,7 +588,14 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
           ),
         ),
         const SizedBox(height: 4),
-        Text(label, style: TextStyle(color: Colors.grey[700], fontSize: 12)),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.grey[600],
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
       ],
     );
   }

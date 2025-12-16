@@ -2,6 +2,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:path_provider/path_provider.dart';
 
 class EditSiswaScreen extends StatefulWidget {
   final int id;
@@ -47,10 +49,54 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
     }
   }
 
+  Future<File?> _compressImage(File file) async {
+    try {
+      final dir = await getTemporaryDirectory();
+      // Membuat path sementara dengan ekstensi .jpg
+      final targetPath =
+          '${dir.absolute.path}/temp_${DateTime.now().millisecondsSinceEpoch}.jpg';
+
+      var result = await FlutterImageCompress.compressAndGetFile(
+        file.absolute.path,
+        targetPath,
+        // --- PENGATURAN BARU ---
+        quality: 80, // Naikkan sedikit ke 80 agar lebih tajam (range 0-100)
+        minWidth: 1920, // Resolusi kita naikkan ke Full HD.
+        // Hapus minHeight agar tinggi otomatis menyesuaikan rasio aslinya.
+        // -----------------------
+        format: CompressFormat.jpeg, // Pastikan outputnya JPEG
+      );
+
+      if (result == null) return null;
+      return File(result.path);
+    } catch (e) {
+      debugPrint("Error compressing image: $e");
+      return file; // Jika gagal kompres, kembalikan file asli
+    }
+  }
+
   Future<void> _pickFile(ImageSource source) async {
-    final picked = await picker.pickImage(source: source, imageQuality: 85);
+    // 1. Ambil gambar (tanpa imageQuality di sini, kita handle di compressor)
+    final picked = await picker.pickImage(source: source);
+
     if (picked != null) {
-      setState(() => selectedFile = File(picked.path));
+      File originalFile = File(picked.path);
+
+      // 2. Tampilkan loading indikator kecil jika perlu (opsional), atau langsung proses
+      // Lakukan kompresi
+      File? compressedFile = await _compressImage(originalFile);
+
+      setState(() {
+        // Gunakan file yang sudah dikompres, jika null pakai yang asli
+        selectedFile = compressedFile ?? originalFile;
+      });
+
+      // Debugging: Cek ukuran file
+      int sizeInBytes = await selectedFile!.length();
+      double sizeInMb = sizeInBytes / (1024 * 1024);
+      debugPrint(
+        'Ukuran file setelah kompres: ${sizeInMb.toStringAsFixed(2)} MB',
+      );
     }
   }
 
@@ -66,7 +112,10 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
           .first; // yyyy-MM-dd
       final statusLower = selectedKeterangan
           ?.toLowerCase(); // hadir/izin/sakit/alfa
-      final userId = _supabase.auth.currentUser!.id;
+
+      // === 1) UPSERT ABSENSI ===
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) throw Exception('User belum login');
 
       await _supabase.from('absensi').upsert({
         'siswa_id': widget.id,

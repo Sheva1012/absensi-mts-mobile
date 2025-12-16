@@ -89,9 +89,9 @@ class KelasScreen extends StatefulWidget {
 class _KelasScreenState extends State<KelasScreen> {
   final _supabase = Supabase.instance.client;
   final _searchController = TextEditingController();
-  
+
   // 2. Tambahkan variabel Timer untuk auto refresh
-  Timer? _autoRefreshTimer; 
+  Timer? _autoRefreshTimer;
   Timer? _debounce;
 
   List<Siswa> _originalSiswaList = [];
@@ -104,7 +104,7 @@ class _KelasScreenState extends State<KelasScreen> {
   void initState() {
     super.initState();
     _fetchData(); // Fetch pertama kali (pakai loading)
-    
+
     // 3. Jalankan Auto Refresh setiap 5 detik
     _startAutoRefresh();
 
@@ -116,10 +116,10 @@ class _KelasScreenState extends State<KelasScreen> {
     _searchController.removeListener(_filterSiswa);
     _searchController.dispose();
     _debounce?.cancel();
-    
+
     // 4. PENTING: Matikan timer saat keluar layar agar tidak memakan memori
-    _autoRefreshTimer?.cancel(); 
-    
+    _autoRefreshTimer?.cancel();
+
     super.dispose();
   }
 
@@ -183,12 +183,12 @@ class _KelasScreenState extends State<KelasScreen> {
       if (!mounted) return;
 
       final newList = (data as List<dynamic>)
-            .map((item) => Siswa.fromJson(item))
-            .toList();
+          .map((item) => Siswa.fromJson(item))
+          .toList();
 
       setState(() {
         _originalSiswaList = newList;
-        
+
         // 5. Logic agar pencarian tidak ter-reset saat auto refresh
         if (_searchController.text.isNotEmpty) {
           _filterSiswa(); // Terapkan ulang filter jika ada teks pencarian
@@ -196,7 +196,6 @@ class _KelasScreenState extends State<KelasScreen> {
           _filteredSiswaList = _originalSiswaList;
         }
       });
-      
     } catch (e) {
       if (!mounted) return;
       // Jika background refresh gagal, jangan ganggu user dengan error screen penuh,
@@ -220,7 +219,7 @@ class _KelasScreenState extends State<KelasScreen> {
   Future<void> _handleRefresh() async {
     _searchController.clear();
     // Manual refresh: Tampilkan loading
-    await _fetchData(isBackground: false); 
+    await _fetchData(isBackground: false);
   }
 
   void _navigateToEdit(Siswa siswa) {
@@ -243,7 +242,7 @@ class _KelasScreenState extends State<KelasScreen> {
 
       if (isSuccess == true) {
         // Refresh langsung agar update terlihat instan
-        _handleRefresh(); 
+        _handleRefresh();
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(
@@ -346,14 +345,15 @@ class _KelasScreenState extends State<KelasScreen> {
       sliver: SliverList.separated(
         itemCount: _filteredSiswaList.length,
         itemBuilder: (context, index) =>
-            _buildTableRow(_filteredSiswaList[index]),
+            _buildTableRow(_filteredSiswaList[index], index + 1),
         separatorBuilder: (context, index) =>
             const Divider(height: 1, indent: 16, endIndent: 16),
       ),
     );
   }
 
-  Widget _buildTableRow(Siswa siswa) {
+  // Tambahkan parameter nomorUrut
+  Widget _buildTableRow(Siswa siswa, int nomorUrut) {
     final bool isTerlambat =
         siswa.absensiHariIni.status.toLowerCase() == 'terlambat';
 
@@ -361,7 +361,9 @@ class _KelasScreenState extends State<KelasScreen> {
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Row(
         children: [
-          _TableCell(siswa.no.toString(), flex: 1),
+          // GANTI DI SINI: Jangan pakai siswa.no, tapi pakai nomorUrut
+          _TableCell(nomorUrut.toString(), flex: 1),
+
           _TableCell(siswa.nama, flex: 3, isName: true),
           _TableCell(siswa.absensiHariIni.status, flex: 3),
           Expanded(

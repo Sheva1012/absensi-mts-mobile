@@ -1,361 +1,246 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
+import 'editSiswa_logic.dart'; // Import Logic
 
-class EditSiswaScreen extends StatefulWidget {
-  final int id;
+class EditSiswaScreen extends StatelessWidget {
+  final int siswaId;
   final String no;
   final String nama;
-  final String? keterangan; // status absensi hari ini (optional)
-  final String? suratUrl; // url surat sebelumnya (optional)
+  final DateTime tanggal;
+  final String? statusAwal; // Rename biar jelas ini data awal
+  final String? suratUrl;
 
   const EditSiswaScreen({
     super.key,
-    required this.id,
+    required this.siswaId,
     required this.no,
     required this.nama,
-    this.keterangan,
+    required this.tanggal,
+    this.statusAwal, // Rename parameter di constructor juga
     this.suratUrl,
   });
 
   @override
-  State<EditSiswaScreen> createState() => _EditSiswaScreenState();
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (_) => EditSiswaLogic(),
+      child: _EditSiswaForm(
+        siswaId: siswaId,
+        no: no,
+        nama: nama,
+        tanggal: tanggal,
+        statusAwal: statusAwal,
+        suratUrl: suratUrl,
+      ),
+    );
+  }
 }
 
-class _EditSiswaScreenState extends State<EditSiswaScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _supabase = Supabase.instance.client;
-  final picker = ImagePicker();
+class _EditSiswaForm extends StatefulWidget {
+  final int siswaId;
+  final String no;
+  final String nama;
+  final DateTime tanggal;
+  final String? statusAwal;
+  final String? suratUrl;
 
-  String? selectedKeterangan;
-  File? selectedFile;
-  bool isLoading = false;
+  const _EditSiswaForm({
+    required this.siswaId,
+    required this.no,
+    required this.nama,
+    required this.tanggal,
+    this.statusAwal,
+    this.suratUrl,
+  });
+
+  @override
+  State<_EditSiswaForm> createState() => _EditSiswaFormState();
+}
+
+class _EditSiswaFormState extends State<_EditSiswaForm> {
+  final _formKey = GlobalKey<FormState>();
+  late String selectedStatus;
 
   @override
   void initState() {
     super.initState();
-
-    // Default 'Alfa' kalau null
-    selectedKeterangan = widget.keterangan ?? 'Alfa';
-
-    // Normalisasi tampilan (Title Case)
-    if (selectedKeterangan != null && selectedKeterangan!.isNotEmpty) {
-      selectedKeterangan =
-          selectedKeterangan![0].toUpperCase() +
-          selectedKeterangan!.substring(1).toLowerCase();
-    }
-  }
-
-  Future<File?> _compressImage(File file) async {
-    try {
-      final dir = await getTemporaryDirectory();
-      // Membuat path sementara dengan ekstensi .jpg
-      final targetPath =
-          '${dir.absolute.path}/temp_${DateTime.now().millisecondsSinceEpoch}.jpg';
-
-      var result = await FlutterImageCompress.compressAndGetFile(
-        file.absolute.path,
-        targetPath,
-        // --- PENGATURAN BARU ---
-        quality: 80, // Naikkan sedikit ke 80 agar lebih tajam (range 0-100)
-        minWidth: 1920, // Resolusi kita naikkan ke Full HD.
-        // Hapus minHeight agar tinggi otomatis menyesuaikan rasio aslinya.
-        // -----------------------
-        format: CompressFormat.jpeg, // Pastikan outputnya JPEG
-      );
-
-      if (result == null) return null;
-      return File(result.path);
-    } catch (e) {
-      debugPrint("Error compressing image: $e");
-      return file; // Jika gagal kompres, kembalikan file asli
-    }
-  }
-
-  Future<void> _pickFile(ImageSource source) async {
-    // 1. Ambil gambar (tanpa imageQuality di sini, kita handle di compressor)
-    final picked = await picker.pickImage(source: source);
-
-    if (picked != null) {
-      File originalFile = File(picked.path);
-
-      // 2. Tampilkan loading indikator kecil jika perlu (opsional), atau langsung proses
-      // Lakukan kompresi
-      File? compressedFile = await _compressImage(originalFile);
-
-      setState(() {
-        // Gunakan file yang sudah dikompres, jika null pakai yang asli
-        selectedFile = compressedFile ?? originalFile;
-      });
-
-      // Debugging: Cek ukuran file
-      int sizeInBytes = await selectedFile!.length();
-      double sizeInMb = sizeInBytes / (1024 * 1024);
-      debugPrint(
-        'Ukuran file setelah kompres: ${sizeInMb.toStringAsFixed(2)} MB',
-      );
-    }
-  }
-
-  Future<void> _submitForm() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() => isLoading = true);
-
-    try {
-      final tanggalOnly = DateTime.now()
-          .toIso8601String()
-          .split('T')
-          .first; // yyyy-MM-dd
-      final statusLower = selectedKeterangan
-          ?.toLowerCase(); // hadir/izin/sakit/alfa
-
-      // === 1) UPSERT ABSENSI ===
-      final userId = _supabase.auth.currentUser?.id;
-      if (userId == null) throw Exception('User belum login');
-
-      await _supabase.from('absensi').upsert({
-        'siswa_id': widget.id,
-        'tanggal': tanggalOnly,
-        'status': statusLower,
-        'updated_by': userId,
-      }, onConflict: 'siswa_id, tanggal');
-
-      // === 2) PROSES SURAT ===
-      final bool needsSurat =
-          selectedKeterangan == 'Sakit' || selectedKeterangan == 'Izin';
-
-      if (needsSurat) {
-        // file_url boleh null (upload tidak wajib)
-        String? finalFileUrl =
-            widget.suratUrl; // pakai url lama jika ada dan tidak upload ulang
-
-        // Kalau user upload file baru, upload dan override file_url
-        if (selectedFile != null) {
-          final ext = selectedFile!.path.split('.').last;
-          final fileName = '${widget.id}_$tanggalOnly.$ext';
-          final filePath = 'surat_izin/${widget.id}/$fileName';
-
-          await _supabase.storage
-              .from('surat_keterangan')
-              .upload(
-                filePath,
-                selectedFile!,
-                fileOptions: const FileOptions(upsert: true),
-              );
-
-          finalFileUrl = _supabase.storage
-              .from('surat_keterangan')
-              .getPublicUrl(filePath);
-        }
-
-        // KUNCI: selalu upsert ke tabel surat (meskipun file_url null)
-        await _supabase.from('surat').upsert({
-          'siswa_id': widget.id,
-          'tanggal': tanggalOnly,
-          'jenis': statusLower, // 'izin' / 'sakit' (pastikan enum DB sesuai)
-          'file_url': finalFileUrl, // boleh null
-        }, onConflict: 'siswa_id, tanggal');
-      } else {
-        // Status Hadir/Alfa: hapus surat jika ada
-        await _supabase.from('surat').delete().match({
-          'siswa_id': widget.id,
-          'tanggal': tanggalOnly,
-        });
-      }
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ Status absensi berhasil disimpan'),
-          backgroundColor: Colors.green,
-        ),
-      );
-
-      Navigator.pop(context, true);
-    } catch (e) {
-      debugPrint('❌ ERROR saat simpan absensi/surat: $e');
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ Gagal menyimpan: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => isLoading = false);
-    }
+    // Default status jika null adalah 'hadir'
+    selectedStatus = widget.statusAwal?.toLowerCase() ?? 'hadir';
   }
 
   @override
   Widget build(BuildContext context) {
-    final bool isUploadEnabled =
-        selectedKeterangan == 'Sakit' || selectedKeterangan == 'Izin';
+    final logic = context.watch<EditSiswaLogic>();
+
+    // Cek apakah butuh upload (Sakit/Izin)
+    final bool isButuhSurat =
+        (selectedStatus == 'sakit' || selectedStatus == 'izin');
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Validasi Absensi Siswa'),
-        centerTitle: true,
+        title: const Text('Validasi Absensi'),
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+        elevation: 0,
       ),
+      backgroundColor: Colors.white,
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
         child: Form(
           key: _formKey,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildReadOnlyField('No. Absen', widget.no),
-              const SizedBox(height: 20),
-              _buildReadOnlyField('Nama Siswa', widget.nama),
-              const SizedBox(height: 20),
+              // Info Siswa Readonly
+              _buildInfoCard(),
+              const SizedBox(height: 24),
 
-              const Text('Keterangan Absensi'),
-              DropdownButtonFormField<String>(
-                value: selectedKeterangan,
-                items: const [
-                  DropdownMenuItem(value: 'Hadir', child: Text('Hadir')),
-                  DropdownMenuItem(value: 'Sakit', child: Text('Sakit')),
-                  DropdownMenuItem(value: 'Izin', child: Text('Izin')),
-                  DropdownMenuItem(value: 'Alfa', child: Text('Alfa')),
-                ],
-                onChanged: (val) {
-                  setState(() {
-                    selectedKeterangan = val;
-                    if (val == 'Hadir' || val == 'Alfa') {
-                      selectedFile = null;
-                    }
-                  });
-                },
-                decoration: const InputDecoration(border: OutlineInputBorder()),
-                validator: (v) =>
-                    v == null ? 'Status tidak boleh kosong' : null,
-              ),
-
-              const SizedBox(height: 20),
-
-              if (widget.suratUrl != null && selectedFile == null)
-                Column(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        widget.suratUrl!,
-                        height: 180,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                        errorBuilder: (c, e, s) => Container(
-                          height: 150,
-                          width: double.infinity,
-                          color: Colors.grey.shade200,
-                          child: const Center(
-                            child: Text('Gagal memuat gambar surat'),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Surat keterangan sebelumnya',
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                    const SizedBox(height: 20),
-                  ],
-                ),
-
-              Text(
-                'Upload Surat Keterangan (Opsional)',
-                style: TextStyle(
-                  color: isUploadEnabled ? Colors.black : Colors.grey,
-                ),
+              // Dropdown Status
+              const Text(
+                "Status Kehadiran",
+                style: TextStyle(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
-
-              GestureDetector(
-                onTap: isUploadEnabled
-                    ? () => _pickFile(ImageSource.gallery)
-                    : null,
-                child: Container(
-                  height: 60,
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey.shade400),
+              DropdownButtonFormField<String>(
+                value: selectedStatus,
+                decoration: InputDecoration(
+                  border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    color: isUploadEnabled
-                        ? Colors.grey.shade100
-                        : Colors.grey.shade300,
                   ),
-                  child: Center(
-                    child: Text(
-                      selectedFile == null
-                          ? 'Pilih file dari galeri'
-                          : selectedFile!.path.split('/').last,
-                      style: TextStyle(
-                        color: isUploadEnabled
-                            ? Colors.black
-                            : Colors.grey[600],
-                      ),
-                    ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
                   ),
                 ),
+                items: const [
+                  DropdownMenuItem(value: 'hadir', child: Text('Hadir ✅')),
+                  DropdownMenuItem(value: 'sakit', child: Text('Sakit 🏥')),
+                  DropdownMenuItem(value: 'izin', child: Text('Izin ✉️')),
+                  DropdownMenuItem(value: 'alpha', child: Text('Alpha ❌')),
+                  DropdownMenuItem(
+                    value: 'terlambat',
+                    child: Text('Terlambat ⏰'),
+                  ),
+                ],
+                onChanged: (val) {
+                  if (val != null) {
+                    setState(() => selectedStatus = val);
+                  }
+                },
               ),
+              const SizedBox(height: 24),
 
-              const SizedBox(height: 10),
-              const Center(child: Text('Atau')),
-              const SizedBox(height: 10),
+              // Area Upload Surat (Kondisional)
+              AnimatedOpacity(
+                opacity: isButuhSurat ? 1.0 : 0.5,
+                duration: const Duration(milliseconds: 300),
+                child: IgnorePointer(
+                  ignoring:
+                      !isButuhSurat, // Disable klik jika tidak butuh surat
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        "Lampiran Surat (Opsional)",
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
 
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: isUploadEnabled ? Colors.green : Colors.grey,
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size(double.infinity, 50),
+                      // Preview Gambar (File Baru atau URL Lama)
+                      if (logic.selectedFile != null)
+                        _buildFilePreview(logic.selectedFile!)
+                      else if (widget.suratUrl != null &&
+                          widget.suratUrl!.isNotEmpty)
+                        _buildUrlPreview(widget.suratUrl!)
+                      else
+                        _buildUploadPlaceholder(),
+
+                      const SizedBox(height: 12),
+
+                      // Tombol Aksi Kamera/Galeri
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () =>
+                                  logic.pickImage(ImageSource.camera),
+                              icon: const Icon(Icons.camera_alt),
+                              label: const Text("Kamera"),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () =>
+                                  logic.pickImage(ImageSource.gallery),
+                              icon: const Icon(Icons.photo_library),
+                              label: const Text("Galeri"),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-                onPressed: isUploadEnabled
-                    ? () => _pickFile(ImageSource.camera)
-                    : null,
-                icon: const Icon(Icons.camera_alt),
-                label: const Text('Ambil Foto'),
               ),
 
               const SizedBox(height: 40),
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.grey,
-                        foregroundColor: Colors.white,
-                      ),
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Batal'),
+
+              // Tombol Simpan
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue[700],
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
                     ),
                   ),
-                  const SizedBox(width: 20),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        foregroundColor: Colors.white,
-                      ),
-                      onPressed: isLoading ? null : _submitForm,
-                      child: isLoading
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 3,
+                  onPressed: logic.isLoading
+                      ? null
+                      : () async {
+                          final success = await logic.submitAbsensi(
+                            siswaId: widget.siswaId,
+                            tanggal: widget.tanggal,
+                            status: selectedStatus,
+                            oldSuratUrl: widget.suratUrl,
+                          );
+
+                          if (!mounted) return;
+
+                          if (success) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Berhasil disimpan!'),
+                                backgroundColor: Colors.green,
                               ),
-                            )
-                          : const Text('Simpan'),
-                    ),
-                  ),
-                ],
+                            );
+                            Navigator.pop(
+                              context,
+                              true,
+                            ); // Kembali dengan result true (refresh)
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Gagal menyimpan data.'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
+                        },
+                  child: logic.isLoading
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : const Text(
+                          "SIMPAN PERUBAHAN",
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                ),
               ),
             ],
           ),
@@ -364,21 +249,95 @@ class _EditSiswaScreenState extends State<EditSiswaScreen> {
     );
   }
 
-  Widget _buildReadOnlyField(String label, String value) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildInfoCard() {
+    final tglStr = widget.tanggal.toIso8601String().split('T')[0];
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.blue[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blue.shade100),
+      ),
+      child: Column(
+        children: [
+          _infoRow("Nama Siswa", widget.nama),
+          const Divider(),
+          _infoRow("Nomor Absen", widget.no),
+          const Divider(),
+          _infoRow("Tanggal Absensi", tglStr),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label),
-        TextFormField(
-          initialValue: value,
-          readOnly: true,
-          decoration: InputDecoration(
-            border: const OutlineInputBorder(),
-            fillColor: Colors.grey.shade200,
-            filled: true,
-          ),
+        Text(label, style: const TextStyle(color: Colors.grey)),
+        Text(
+          value,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
         ),
       ],
+    );
+  }
+
+  Widget _buildFilePreview(File file) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Image.file(
+        file,
+        height: 200,
+        width: double.infinity,
+        fit: BoxFit.cover,
+      ),
+    );
+  }
+
+  Widget _buildUrlPreview(String url) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Image.network(
+        url,
+        height: 200,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          return Container(
+            height: 200,
+            color: Colors.grey[200],
+            alignment: Alignment.center,
+            child: const Text(
+              "Gagal memuat gambar",
+              style: TextStyle(color: Colors.grey),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildUploadPlaceholder() {
+    return Container(
+      height: 150,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: Colors.grey.shade300,
+          style: BorderStyle.solid,
+        ),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: const [
+          Icon(Icons.cloud_upload_outlined, size: 40, color: Colors.grey),
+          SizedBox(height: 8),
+          Text("Belum ada lampiran", style: TextStyle(color: Colors.grey)),
+        ],
+      ),
     );
   }
 }

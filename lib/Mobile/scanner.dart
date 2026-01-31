@@ -1,54 +1,61 @@
-import 'dart:async'; // Import untuk menggunakan Timer
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 class BarcodeScannerPage extends StatefulWidget {
   final void Function(String) onResult;
-  final Color borderColor;
+  final Color borderColor; // Menerima warna dari Parent (ScannerDialog)
 
-  const BarcodeScannerPage({super.key, required this.onResult, required this.borderColor});
+  const BarcodeScannerPage({
+    super.key,
+    required this.onResult,
+    required this.borderColor,
+  });
 
   @override
   State<BarcodeScannerPage> createState() => _BarcodeScannerPageState();
 }
 
 class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
+  // Controller Scanner
   final MobileScannerController _controller = MobileScannerController(
-    facing: CameraFacing.front,
+    facing: CameraFacing.front, // Default kamera depan
     torchEnabled: false,
+    formats: [BarcodeFormat.qrCode], // Optimasi: Hanya scan QR
+    detectionSpeed: DetectionSpeed.normal, // Hemat baterai
   );
 
+  // Debounce lokal untuk mencegah spamming callback ke parent
   String? _lastScanned;
   DateTime _lastScanTime = DateTime.now();
-  
-  // PERBAIKAN: Tambahkan state untuk warna border
-  Color _borderColor = Colors.red;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.black,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('Pemindai Barcode'),
+        title: const Text('Pemindai Absensi'),
+        centerTitle: true,
         backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
         elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.cameraswitch_outlined),
+            icon: const Icon(Icons.cameraswitch_rounded),
             tooltip: 'Ganti Kamera',
             onPressed: () => _controller.switchCamera(),
           ),
           IconButton(
-            icon: const Icon(Icons.close),
-            tooltip: 'Tutup',
-            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.flash_on_rounded),
+            tooltip: 'Flash',
+            onPressed: () => _controller.toggleTorch(),
           ),
+          const SizedBox(width: 8),
         ],
       ),
-      backgroundColor: Colors.black,
-      extendBodyBehindAppBar: true,
       body: Stack(
         children: [
+          // 1. KAMERA SCANNER
           MobileScanner(
             controller: _controller,
             onDetect: (capture) {
@@ -56,55 +63,73 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
               if (barcodes.isNotEmpty) {
                 final result = barcodes.first.rawValue;
                 final now = DateTime.now();
+
+                // Debounce Lokal: Cegah scan code yg sama dlm 1.5 detik
                 if (result != null &&
                     (result != _lastScanned ||
-                        now.difference(_lastScanTime).inMilliseconds > 2000)) { // Tambah jeda
+                        now.difference(_lastScanTime).inMilliseconds > 1500)) {
                   _lastScanned = result;
                   _lastScanTime = now;
-                  
-                  // PERBAIKAN: Ubah warna menjadi hijau saat scan berhasil
-                  setState(() {
-                    _borderColor = Colors.greenAccent;
-                  });
 
+                  // Kirim hasil ke Parent (ScannerDialog)
+                  // Parent yang akan mengubah warna border & proses DB
                   widget.onResult(result);
-
-                  // Kembalikan warna ke merah setelah 2 detik
-                  Timer(const Duration(seconds: 2), () {
-                    if (mounted) {
-                      setState(() {
-                        _borderColor = Colors.red;
-                      });
-                    }
-                  });
                 }
               }
             },
           ),
-          
-          CustomPaint(
-            size: MediaQuery.of(context).size,
-            // PERBAIKAN: Kirim state warna ke painter
-            painter: ScannerOverlayPainter(borderColor: _borderColor),
-          ),
 
-          const Center(
-            child: SizedBox(
-              width: 260,
-              height: 260,
+          // 2. OVERLAY (GELAP + KOTAK)
+          // Menggunakan RepaintBoundary untuk performa
+          RepaintBoundary(
+            child: CustomPaint(
+              size: MediaQuery.of(context).size,
+              painter: ScannerOverlayPainter(
+                borderColor: widget.borderColor, // Pakai warna dari parent
+              ),
             ),
           ),
+
+          // 3. TEKS INSTRUKSI
           const Positioned(
-            bottom: 50,
+            bottom: 80,
             left: 0,
             right: 0,
-            child: Text(
-              '📷 Arahkan QR ke dalam kotak\nScanner aktif terus-menerus',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
+            child: Column(
+              children: [
+                Text(
+                  'Arahkan QR Code ke dalam kotak',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    shadows: [Shadow(color: Colors.black, blurRadius: 4)],
+                  ),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'Pastikan pencahayaan cukup',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    shadows: [Shadow(color: Colors.black, blurRadius: 4)],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // 4. Close Button (Floating)
+          Positioned(
+            top: 40,
+            left: 16,
+            child: CircleAvatar(
+              backgroundColor: Colors.black45,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white),
+                onPressed: () => Navigator.pop(context),
               ),
             ),
           ),
@@ -120,43 +145,65 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
   }
 }
 
-// Class baru untuk menggambar overlay
+// PAINTER UNTUK OVERLAY
 class ScannerOverlayPainter extends CustomPainter {
-  // PERBAIKAN: Terima warna border sebagai parameter
   final Color borderColor;
+
   ScannerOverlayPainter({required this.borderColor});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final screenRect = Rect.fromLTWH(0, 0, size.width, size.height);
-    final scanWindowRect = Rect.fromCenter(
-      center: screenRect.center,
-      width: 260,
-      height: 260,
-    );
-    final scanWindowRRect = RRect.fromRectAndRadius(scanWindowRect, const Radius.circular(16));
+    // Area Gelap (Background)
+    final backgroundPath = Path()
+      ..addRect(Rect.fromLTWH(0, 0, size.width, size.height));
 
-    final backgroundPaint = Paint()..color = Colors.black.withOpacity(0.8);
+    // Area Kotak Scan (Bolong)
+    final scanWindowSize = 280.0;
+    final scanWindowRect = Rect.fromCenter(
+      center: Offset(size.width / 2, size.height / 2),
+      width: scanWindowSize,
+      height: scanWindowSize,
+    );
+
+    final cutOutPath = Path()
+      ..addRRect(
+        RRect.fromRectAndRadius(scanWindowRect, const Radius.circular(20)),
+      );
+
+    // Gabungkan (Background - Kotak)
+    final finalPath = Path.combine(
+      PathOperation.difference,
+      backgroundPath,
+      cutOutPath,
+    );
+
+    final backgroundPaint = Paint()
+      ..color = Colors.black
+          .withOpacity(0.6) // Gelap transparan
+      ..style = PaintingStyle.fill;
+
+    canvas.drawPath(finalPath, backgroundPaint);
+
+    // Gambar Border Kotak (Warna Dinamis)
     final borderPaint = Paint()
-      // PERBAIKAN: Gunakan warna dari parameter
       ..color = borderColor
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 4;
+      ..strokeWidth =
+          5 // Lebih tebal biar jelas
+      ..strokeCap = StrokeCap.round;
 
-    final cutOutPath = Path.combine(
-      PathOperation.difference,
-      Path()..addRect(screenRect),
-      Path()..addRRect(scanWindowRRect),
+    // Gambar 4 Sudut (Corner) saja biar keren, atau Full Box
+    // Disini kita gambar Full Box Rounded
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(scanWindowRect, const Radius.circular(20)),
+      borderPaint,
     );
-    
-    canvas.drawPath(cutOutPath, backgroundPaint);
-    canvas.drawRRect(scanWindowRRect, borderPaint);
+
+    // Opsional: Tambahkan garis scan animasi di masa depan
   }
 
   @override
   bool shouldRepaint(covariant ScannerOverlayPainter oldDelegate) {
-    // Repaint jika warna border berubah
     return oldDelegate.borderColor != borderColor;
   }
 }
-

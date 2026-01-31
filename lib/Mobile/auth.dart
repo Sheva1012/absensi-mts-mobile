@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// Import semua halaman tujuan
+// Import halaman tujuan
 import 'formLogin.dart';
-import 'dashboard.dart';
-import 'scan_dashboard_screen.dart';
+import 'dashboard.dart'; // Dashboard Guru
+import 'scan_dashboard_screen.dart'; // Dashboard Admin (Scanner)
 
 class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
@@ -14,81 +14,164 @@ class AuthWrapper extends StatefulWidget {
 }
 
 class _AuthWrapperState extends State<AuthWrapper> {
+  bool _isError = false;
+  String _errorMessage = '';
+
   @override
   void initState() {
     super.initState();
-    _redirect();
+    _checkAuth();
   }
 
-  Future<void> _redirect() async {
-    // Tunggu frame pertama selesai dirender untuk menghindari error build
-    await Future.delayed(Duration.zero);
-    if (!mounted) return;
+  // DI DALAM FILE auth_wrapper.dart
 
-    final session = Supabase.instance.client.auth.currentSession;
+  Future<void> _checkAuth() async {
+    await Future.delayed(Duration.zero);
+    
+    print("--- [DEBUG] MULAI PENGECEKAN AUTH ---");
+
+    // 1. Cek Koneksi Supabase
+    final supabase = Supabase.instance.client;
+    final session = supabase.auth.currentSession;
 
     if (session == null) {
-      print("[AuthWrapper] Tidak ada sesi aktif, mengarahkan ke LoginScreen.");
-      // Jika tidak ada sesi, arahkan ke halaman login
-      Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => const LoginScreen()),
-          (route) => false);
+      print("--- [DEBUG] Session Kosong. Mengarahkan ke Login. ---");
+      if (!mounted) return;
+      _navigateTo(const LoginScreen());
       return;
     }
 
-    // Jika ada sesi, ambil peran pengguna
-    print("[AuthWrapper] Sesi ditemukan untuk user ID: ${session.user.id}. Mengambil peran...");
+    final userId = session.user.id;
+    final email = session.user.email;
+    print("--- [DEBUG] User Login Ditemukan ---");
+    print("--- [DEBUG] Email: $email");
+    print("--- [DEBUG] User UID: $userId");
+
+    // 2. Coba Ambil Data Guru
     try {
-      final userId = session.user.id;
-      final data = await Supabase.instance.client
-          .from('guru') // <-- PASTIKAN NAMA TABEL INI BENAR ('guru' atau 'profiles')
+      print("--- [DEBUG] Mencoba query ke tabel 'guru'... ---");
+
+      // Menggunakan maybeSingle() agar tidak error crash jika data kosong
+      final data = await supabase
+          .from('guru')
           .select('role')
           .eq('id', userId)
-          .single();
+          .maybeSingle();
+
+      print("--- [DEBUG] Hasil Query Database: $data ---");
+
+      if (data == null) {
+        print("!!! [CRITICAL ERROR] Data tidak ditemukan di tabel guru !!!");
+        print(
+          "Penyebab: ID di tabel 'guru' TIDAK SAMA dengan User UID ($userId)",
+        );
+
+        if (mounted) {
+          setState(() {
+            _isError = true;
+            _errorMessage =
+                "Akun terdaftar di Auth, tapi data profil 'guru' belum dibuat.\n\nUser ID: $userId";
+          });
+        }
+        return;
+      }
 
       final role = data['role'] as String?;
-      print("[AuthWrapper] Peran ditemukan: '$role'. Mengarahkan pengguna...");
+      print("--- [DEBUG] Role ditemukan: $role ---");
 
       if (!mounted) return;
 
-      // Arahkan berdasarkan peran
       if (role == 'guru') {
-        Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (context) => const DashboardScreen()),
-            (route) => false);
+        print("--- [DEBUG] Redirect ke Dashboard Guru ---");
+        _navigateTo(const DashboardScreen());
       } else if (role == 'admin') {
-        Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(
-                builder: (context) => const ScanDashboardScreen()),
-            (route) => false);
+        print("--- [DEBUG] Redirect ke Scan Dashboard ---");
+        _navigateTo(const ScanDashboardScreen());
       } else {
-        // Jika peran tidak dikenali, logout dan kembali ke login
-        print("[AuthWrapper] Peran tidak dikenali. Melakukan logout...");
-        await Supabase.instance.client.auth.signOut();
-        Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (context) => const LoginScreen()),
-            (route) => false);
+        print("--- [DEBUG] Role tidak dikenal: $role ---");
+        await supabase.auth.signOut();
+        _navigateTo(const LoginScreen());
       }
     } catch (e) {
-      // Jika gagal mengambil profil (misalnya, data tidak ada atau RLS salah)
-      print("!!! ERROR di AuthWrapper: Gagal mengambil profil. Pesan: ${e.toString()}");
-      print("[AuthWrapper] Melakukan logout karena gagal mengambil profil...");
-      await Supabase.instance.client.auth.signOut();
-      if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => const LoginScreen()),
-          (route) => false);
+      print("!!! [EXCEPTION] Error Keras: $e");
+      if (mounted) {
+        setState(() {
+          _isError = true;
+          _errorMessage = "Error Database: $e";
+        });
+      }
     }
+  }
+
+  void _navigateTo(Widget screen) {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (context) => screen),
+      (route) => false,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    // Tampilkan layar loading saat proses redirect berjalan
-    return const Scaffold(
-      body: Center(
-        child: CircularProgressIndicator(),
+    return Scaffold(
+      backgroundColor: Colors.white, // Sesuaikan warna brand sekolah
+      body: Center(child: _isError ? _buildErrorView() : _buildLoadingView()),
+    );
+  }
+
+  // Tampilan Loading dengan Logo (Splash Screen)
+  Widget _buildLoadingView() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        // Pastikan logo ada di assets
+        Image.asset(
+          'assets/LogoMts.png',
+          width: 100,
+          height: 100,
+          errorBuilder: (context, error, stackTrace) =>
+              const Icon(Icons.school, size: 80, color: Colors.blue),
+        ),
+        const SizedBox(height: 24),
+        const CircularProgressIndicator(),
+        const SizedBox(height: 16),
+        const Text(
+          "Memuat Data Pengguna...",
+          style: TextStyle(color: Colors.grey),
+        ),
+      ],
+    );
+  }
+
+  // Tampilan Error dengan Tombol Retry
+  Widget _buildErrorView() {
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.wifi_off, size: 60, color: Colors.red),
+          const SizedBox(height: 16),
+          Text(
+            _errorMessage,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 16),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: _checkAuth, // Coba lagi
+            icon: const Icon(Icons.refresh),
+            label: const Text("Coba Lagi"),
+          ),
+          TextButton(
+            onPressed: () async {
+              // Opsi logout manual jika user ingin ganti akun
+              await Supabase.instance.client.auth.signOut();
+              if (mounted) _navigateTo(const LoginScreen());
+            },
+            child: const Text("Logout / Ganti Akun"),
+          ),
+        ],
       ),
     );
   }
 }
-

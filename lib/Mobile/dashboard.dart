@@ -1,528 +1,298 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'KelasScreen.dart'; // Pastikan file ini benar
+import 'package:provider/provider.dart';
+import 'dashboard_logic.dart';
 import 'formLogin.dart';
+import 'KelasScreen.dart';
 
-final _supabase = Supabase.instance.client;
-
-// ====================== MODELS ==========================
-
-class TeacherProfile {
-  final String nama;
-  final String? avatarUrl;
-  final Map<String, List<String>> kelasDiampu;
-
-  TeacherProfile({
-    required this.nama,
-    required this.kelasDiampu,
-    this.avatarUrl,
-  });
-
-  factory TeacherProfile.fromSupabase(Map<String, dynamic> data) {
-    final kelasData = data['kelas_diampu'];
-    final Map<String, List<String>> kelasDiampuTyped = {};
-
-    if (kelasData is Map<String, dynamic>) {
-      kelasData.forEach((key, value) {
-        if (value is List) {
-          kelasDiampuTyped[key] = value.map((item) => item.toString()).toList();
-        }
-      });
-    }
-
-    return TeacherProfile(
-      nama: data['nama'] ?? 'Nama Guru',
-      avatarUrl: data['avatar_url'],
-      kelasDiampu: kelasDiampuTyped,
-    );
-  }
-}
-
-class ClassSummary {
-  final String namaKelas;
-  final int totalSiswa;
-  final int sudahAbsen;
-  final int terlambat;
-  final int sakit;
-  final int izin;
-  final int alfa;
-  final int belumAbsen; // Data kosong (error/siswa baru)
-
-  ClassSummary({
-    required this.namaKelas,
-    required this.totalSiswa,
-    required this.sudahAbsen,
-    required this.terlambat,
-    required this.sakit,
-    required this.izin,
-    required this.alfa,
-    required this.belumAbsen,
-  });
-}
-
-class DashboardData {
-  final List<ClassSummary> summaries;
-  final int totalSiswaAlfa;
-
-  DashboardData({required this.summaries, required this.totalSiswaAlfa});
-
-  double get persentaseKehadiran {
-    final totalSiswa = summaries.fold(0, (sum, item) => sum + item.totalSiswa);
-    final totalHadir = summaries.fold(
-      0,
-      (sum, item) => sum + item.sudahAbsen + item.terlambat,
-    );
-    if (totalSiswa == 0) return 0.0;
-    return (totalHadir / totalSiswa) * 100;
-  }
-}
-
-// ====================== DASHBOARD SCREEN (CONTROLLER UTAMA) ==========================
-
-class DashboardScreen extends StatefulWidget {
+class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
   @override
-  State<DashboardScreen> createState() => _DashboardScreenState();
-}
-
-class _DashboardScreenState extends State<DashboardScreen> {
-  late final Future<TeacherProfile?> _teacherProfileFuture;
-
-  // STATE UNTUK MENGATUR KONTEN YANG TAMPIL
-  String? _selectedKelas; // Jika null, tampilkan Dashboard Home
-
-  @override
-  void initState() {
-    super.initState();
-    _teacherProfileFuture = _fetchTeacherProfile();
-  }
-
-  Future<TeacherProfile?> _fetchTeacherProfile() async {
-    final user = _supabase.auth.currentUser;
-    if (user == null) return null;
-
-    try {
-      final data = await _supabase
-          .from('guru')
-          .select()
-          .eq('id', user.id)
-          .single();
-
-      return TeacherProfile.fromSupabase(data);
-    } catch (e) {
-      debugPrint('Error fetching teacher profile: $e');
-      return null;
-    }
-  }
-
-  // Fungsi untuk ganti tampilan ke Dashboard Utama
-  void _showDashboard() {
-    setState(() {
-      _selectedKelas = null;
-    });
-    // Jika di mobile (drawer terbuka), opsional: Navigator.pop(context);
-    // Tapi user minta "jangan otomatis tutup", jadi kita biarkan drawer.
-  }
-
-  // Fungsi untuk ganti tampilan ke Kelas Tertentu
-  void _showKelas(String namaKelas) {
-    setState(() {
-      _selectedKelas = namaKelas;
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return FutureBuilder<TeacherProfile?>(
-      future: _teacherProfileFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
-
-        if (snapshot.hasError || !snapshot.hasData) {
-          return Scaffold(
-            body: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text("Gagal memuat data profil."),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () async => await _supabase.auth.signOut(),
-                    child: const Text("Kembali ke Login"),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
-
-        final teacherProfile = snapshot.data!;
-        final isDesktop = MediaQuery.of(context).size.width > 800;
-
-        return Scaffold(
-          backgroundColor: Colors.grey[100],
-          appBar: isDesktop
-              ? null
-              : AppBar(
-                  title: Text(
-                    _selectedKelas ?? 'Dashboard',
-                  ), // Judul berubah dinamis
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.black,
-                  elevation: 0,
-                ),
-          // Sidebar dikirim callback _showKelas dan _showDashboard
-          drawer: isDesktop
-              ? null
-              : AppSidebar(
-                  teacherProfile: teacherProfile,
-                  onDashboardTap: _showDashboard,
-                  onKelasTap: _showKelas,
-                  selectedKelas: _selectedKelas,
-                ),
-          body: Row(
-            children: [
-              if (isDesktop)
-                AppSidebar(
-                  teacherProfile: teacherProfile,
-                  onDashboardTap: _showDashboard,
-                  onKelasTap: _showKelas,
-                  selectedKelas: _selectedKelas,
-                ),
-
-              // AREA KONTEN YANG BERUBAH-UBAH
-              Expanded(
-                child: _selectedKelas == null
-                    ? MainDashboardContent(teacherProfile: teacherProfile)
-                    : KelasScreen(
-                        namaKelas: _selectedKelas!,
-                      ), // KelasScreen ditampilkan di sini
-              ),
-            ],
-          ),
-        );
-      },
+    return ChangeNotifierProvider(
+      create: (_) => DashboardLogic()..loadDashboard(),
+      child: const _DashboardView(),
     );
   }
 }
 
-// ====================== UTILS ==========================
-
-String normalizeClassName(String name) {
-  return name
-      .replaceAll(RegExp(r'kelas', caseSensitive: false), '')
-      .trim()
-      .toUpperCase()
-      .replaceAll(' ', '');
-}
-
-// ====================== MAIN DASHBOARD CONTENT ==========================
-
-class MainDashboardContent extends StatefulWidget {
-  final TeacherProfile teacherProfile;
-
-  const MainDashboardContent({super.key, required this.teacherProfile});
+class _DashboardView extends StatefulWidget {
+  const _DashboardView();
 
   @override
-  State<MainDashboardContent> createState() => _MainDashboardContentState();
+  State<_DashboardView> createState() => _DashboardViewState();
 }
 
-class _MainDashboardContentState extends State<MainDashboardContent> {
-  late Future<DashboardData> _dashboardDataFuture;
+class _DashboardViewState extends State<_DashboardView> {
+  // Navigation State
+  String? _selectedKelas;
 
-  @override
-  void initState() {
-    super.initState();
-    _dashboardDataFuture = _fetchDashboardData();
+  void _onKelasSelected(String namaKelas) {
+    setState(() => _selectedKelas = namaKelas);
+    Navigator.pop(context); // Tutup drawer
   }
 
-  Future<void> _refreshData() async {
-    setState(() {
-      _dashboardDataFuture = _fetchDashboardData();
-    });
-  }
-
-  Future<DashboardData> _fetchDashboardData() async {
-    try {
-      final rawClassNames = widget.teacherProfile.kelasDiampu.values
-          .expand((list) => list)
-          .toList();
-
-      final List<String> normalizedClassNames = rawClassNames
-          .map((e) => normalizeClassName(e))
-          .toList();
-
-      final kelasRaw = await _supabase.from('kelas').select('id, nama_kelas');
-
-      final kelasDataList = kelasRaw.where((kelas) {
-        final namaDb = kelas['nama_kelas'];
-        if (namaDb == null) return false;
-        return normalizedClassNames.contains(normalizeClassName(namaDb));
-      }).toList();
-
-      if (kelasDataList.isEmpty) {
-        return DashboardData(summaries: [], totalSiswaAlfa: 0);
-      }
-
-      final kelasIdList = kelasDataList
-          .map<int?>((e) => e['id'])
-          .whereType<int>()
-          .toList();
-
-      final siswaList = await _supabase
-          .from('siswa')
-          .select('id, kelas_id')
-          .inFilter('kelas_id', kelasIdList);
-
-      final allSiswaIds = siswaList
-          .map<int?>((s) => s['id'])
-          .whereType<int>()
-          .toList();
-
-      final now = DateTime.now();
-      final todayStart = DateTime(
-        now.year,
-        now.month,
-        now.day,
-      ).toIso8601String();
-      final todayEnd = DateTime(
-        now.year,
-        now.month,
-        now.day,
-        23,
-        59,
-        59,
-      ).toIso8601String();
-
-      final absensiRaw = allSiswaIds.isEmpty
-          ? []
-          : await _supabase
-                .from('absensi')
-                .select('siswa_id, status, created_at')
-                .inFilter('siswa_id', allSiswaIds)
-                .gte('created_at', todayStart)
-                .lte('created_at', todayEnd);
-
-      final todayAbsensiList = absensiRaw.where((a) {
-        final date = DateTime.tryParse(a['created_at'] ?? '');
-        if (date == null) return false;
-        return date.year == now.year &&
-            date.month == now.month &&
-            date.day == now.day;
-      }).toList();
-
-      final summaries = kelasDataList
-          .map((kelas) {
-            final kelasId = kelas['id'];
-            final namaKelas = kelas['nama_kelas'] ?? "-";
-
-            // Filter siswa
-            final siswaDalamKelas = siswaList
-                .where((s) => s['kelas_id'] == kelasId)
-                .map<int?>((s) => s['id'])
-                .whereType<int>()
-                .toSet();
-
-            final totalSiswa = siswaDalamKelas.length;
-
-            // Filter absensi
-            final absensiKelas = todayAbsensiList.where((a) {
-              return siswaDalamKelas.contains(a['siswa_id']);
-            }).toList();
-
-            // --- LOGIC EKSPLISIT PER STATUS ---
-
-            // 1. Hadir
-            final hadir = absensiKelas
-                .where((a) => a['status'].toString().toLowerCase() == 'hadir')
-                .length;
-
-            // 2. Terlambat
-            final terlambat = absensiKelas
-                .where(
-                  (a) => a['status'].toString().toLowerCase() == 'terlambat',
-                )
-                .length;
-
-            // 3. Sakit
-            final sakit = absensiKelas
-                .where((a) => a['status'].toString().toLowerCase() == 'sakit')
-                .length;
-
-            // 4. Izin
-            final izin = absensiKelas
-                .where((a) => a['status'].toString().toLowerCase() == 'izin')
-                .length;
-
-            // 5. Alfa
-            // Karena digenerate otomatis, Alfa akan tinggi di pagi hari
-            final alfa = absensiKelas
-                .where((a) => a['status'].toString().toLowerCase() == 'alfa')
-                .length;
-
-            // 6. Belum Absen (Data Kosong / Error Cron)
-            // Harusnya 0 jika sistem normal
-            final rowCount = absensiKelas.length;
-            final belumAbsen = totalSiswa - rowCount;
-
-            return ClassSummary(
-              namaKelas: namaKelas,
-              totalSiswa: totalSiswa,
-              sudahAbsen: hadir,
-              terlambat: terlambat,
-              sakit: sakit, // Eksplisit
-              izin: izin, // Eksplisit
-              alfa: alfa, // Eksplisit
-              belumAbsen: belumAbsen,
-            );
-          })
-          .whereType<ClassSummary>()
-          .toList();
-
-      // Hitung Total Alfa Global
-      final totalAlfa = todayAbsensiList
-          .where((a) => a['status'].toString().toLowerCase() == 'alfa')
-          .length;
-
-      return DashboardData(summaries: summaries, totalSiswaAlfa: totalAlfa);
-    } catch (e, s) {
-      debugPrint("Dashboard Error: $e");
-      debugPrint(s.toString());
-      return DashboardData(summaries: [], totalSiswaAlfa: 0);
-    }
+  void _onHomeSelected() {
+    setState(() => _selectedKelas = null);
+    Navigator.pop(context); // Tutup drawer
   }
 
   @override
   Widget build(BuildContext context) {
-    final today = DateTime.now();
-    final formattedDate =
-        "${today.day.toString().padLeft(2, '0')}/${today.month.toString().padLeft(2, '0')}/${today.year}";
+    final logic = context.watch<DashboardLogic>();
 
-    return FutureBuilder<DashboardData>(
-      future: _dashboardDataFuture,
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
+    if (logic.isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
-        final data = snapshot.data!;
-
-        return RefreshIndicator(
-          onRefresh: _refreshData,
-          child: ListView(
-            padding: const EdgeInsets.all(16),
+    if (logic.errorMessage.isNotEmpty) {
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    "Ringkasan Hari Ini",
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  Text(
-                    formattedDate,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                ],
-              ),
+              Text(logic.errorMessage, textAlign: TextAlign.center),
               const SizedBox(height: 16),
-              _buildQuickStatsCard(data.persentaseKehadiran),
-              const SizedBox(height: 24),
-              Text(
-                "Summary Kelas",
-                style: Theme.of(context).textTheme.headlineSmall,
+              ElevatedButton(
+                onPressed: logic.loadDashboard,
+                child: const Text("Coba Lagi"),
               ),
-              const SizedBox(height: 16),
-
-              if (data.summaries.isEmpty)
-                const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(20.0),
-                    child: Text("Tidak ada kelas yang diajar."),
-                  ),
-                ),
-              ...data.summaries.map(_buildClassSummaryCard),
             ],
           ),
-        );
-      },
-    );
-  }
+        ),
+      );
+    }
 
-  Widget _buildQuickStatsCard(double percentage) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Row(
+    // Jika _selectedKelas tidak null, tampilkan Screen Kelas Detail
+    // Pastikan kamu sudah punya file KelasScreen.dart yang menerima parameter namaKelas
+    if (_selectedKelas != null) {
+      return WillPopScope(
+        onWillPop: () async {
+          setState(
+            () => _selectedKelas = null,
+          ); // Back button kembali ke dashboard
+          return false;
+        },
+        child: KelasScreen(namaKelas: _selectedKelas!),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: Colors.grey[100],
+      appBar: AppBar(
+        title: const Text("Dashboard Guru"),
+        elevation: 0,
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+        iconTheme: const IconThemeData(color: Colors.black),
+      ),
+      drawer: _buildDrawer(context, logic),
+      body: RefreshIndicator(
+        onRefresh: logic.loadDashboard,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
           children: [
-            SizedBox(
-              width: 60,
-              height: 60,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  CircularProgressIndicator(
-                    value: percentage / 100,
-                    strokeWidth: 6,
-                    backgroundColor: Colors.grey[300],
-                    valueColor: const AlwaysStoppedAnimation<Color>(
-                      Colors.teal,
-                    ),
-                  ),
-                  Center(
-                    child: Text(
-                      "${percentage.toStringAsFixed(0)}%",
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ],
-              ),
+            _buildHeaderDate(),
+            const SizedBox(height: 16),
+            _buildAttendanceCard(logic.attendanceRate),
+            const SizedBox(height: 24),
+            Text(
+              "Ringkasan Kelas Hari Ini",
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
             ),
-            const SizedBox(width: 16),
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "Tingkat Kehadiran",
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
-                  Text("Persentase siswa yang hadir/terlambat hari ini."),
-                ],
+            const SizedBox(height: 16),
+            if (logic.summaryList.isEmpty)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Text("Belum ada kelas yang diajar."),
+                ),
               ),
-            ),
+
+            ...logic.summaryList.map((data) => _ClassSummaryCard(data: data)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildClassSummaryCard(ClassSummary summary) {
+  Widget _buildDrawer(BuildContext context, DashboardLogic logic) {
+    return Drawer(
+      child: Column(
+        children: [
+          UserAccountsDrawerHeader(
+            decoration: const BoxDecoration(color: Color(0xFF2F6CB0)),
+            accountName: Text(
+              logic.guruProfile?['nama'] ?? 'Guru',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+            accountEmail: const Text("MTs Sunan Gunung Jati"),
+            currentAccountPicture: CircleAvatar(
+              backgroundColor: Colors.white,
+              backgroundImage: logic.guruProfile?['avatar_url'] != null
+                  ? NetworkImage(logic.guruProfile!['avatar_url'])
+                  : null,
+              child: logic.guruProfile?['avatar_url'] == null
+                  ? const Icon(Icons.person, size: 40, color: Colors.grey)
+                  : null,
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.dashboard),
+            title: const Text("Dashboard Utama"),
+            onTap: _onHomeSelected,
+          ),
+          const Divider(),
+          const Padding(
+            padding: EdgeInsets.only(left: 16, top: 8, bottom: 8),
+            child: Text(
+              "Daftar Kelas",
+              style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold),
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: EdgeInsets.zero,
+              children: logic.kelasDiampu.entries.map((entry) {
+                return ExpansionTile(
+                  leading: const Icon(Icons.class_),
+                  title: Text(entry.key), // Nama Tingkat (e.g. "Kelas 7")
+                  children: entry.value.map((kelasName) {
+                    return ListTile(
+                      contentPadding: const EdgeInsets.only(left: 50),
+                      title: Text(kelasName),
+                      onTap: () => _onKelasSelected(kelasName),
+                    );
+                  }).toList(),
+                );
+              }).toList(),
+            ),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.logout, color: Colors.red),
+            title: const Text("Keluar", style: TextStyle(color: Colors.red)),
+            onTap: () async {
+              await logic.logout(context);
+              if (mounted) {
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                  (route) => false,
+                );
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeaderDate() {
+    final now = DateTime.now();
+    // Simple date formatter manually or use intl
+    final dateStr = "${now.day}/${now.month}/${now.year}";
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        const Text(
+          "Overview",
+          style: TextStyle(fontSize: 16, color: Colors.grey),
+        ),
+        Text(dateStr, style: const TextStyle(fontWeight: FontWeight.bold)),
+      ],
+    );
+  }
+
+  Widget _buildAttendanceCard(double rate) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.blue.shade800, Colors.blue.shade500],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.blue.withOpacity(0.3),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 70,
+            height: 70,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                CircularProgressIndicator(
+                  value: rate / 100,
+                  strokeWidth: 8,
+                  valueColor: const AlwaysStoppedAnimation(Colors.white),
+                  backgroundColor: Colors.white24,
+                ),
+                Center(
+                  child: Text(
+                    "${rate.toStringAsFixed(0)}%",
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 20),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Total Kehadiran",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  "Akumulasi kehadiran siswa hari ini",
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ClassSummaryCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _ClassSummaryCard({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
     return Card(
-      elevation: 2,
       margin: const EdgeInsets.only(bottom: 16),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header Card (Nama Kelas & Total)
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  summary.namaKelas,
+                  data['nama_kelas'] ?? '-',
                   style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -530,42 +300,33 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
+                    horizontal: 10,
+                    vertical: 4,
                   ),
                   decoration: BoxDecoration(
                     color: Colors.blue.shade50,
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.blue.shade100),
                   ),
                   child: Text(
-                    "Total: ${summary.totalSiswa}",
+                    "Total: ${data['total_siswa']}",
                     style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
                       color: Colors.blue.shade800,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
                     ),
                   ),
                 ),
               ],
             ),
             const Divider(height: 24),
-
-            // Grid Statistik (Menggunakan Wrap agar responsif)
-            Wrap(
-              spacing: 16, // Jarak horizontal antar item
-              runSpacing: 16, // Jarak vertikal jika turun ke baris baru
-              alignment: WrapAlignment.spaceAround,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _stat("Hadir", summary.sudahAbsen, Colors.green),
-                _stat("Terlambat", summary.terlambat, Colors.teal),
-                _stat("Sakit", summary.sakit, Colors.blue),
-                _stat("Izin", summary.izin, Colors.orange),
-                _stat("Alfa", summary.alfa, Colors.red),
-
-                // Tampilkan 'Belum Absen' hanya jika ada (biar tidak memenuhi layar jika 0)
-                if (summary.belumAbsen > 0)
-                  _stat("No Data", summary.belumAbsen, Colors.grey),
+                _statItem("Hadir", data['hadir'], Colors.green),
+                _statItem("Telat", data['terlambat'], Colors.orange),
+                _statItem("Sakit", data['sakit'], Colors.blue),
+                _statItem("Izin", data['izin'], Colors.purple),
+                _statItem("Alfa", data['alfa'], Colors.red),
               ],
             ),
           ],
@@ -574,295 +335,20 @@ class _MainDashboardContentState extends State<MainDashboardContent> {
     );
   }
 
-  // Widget helper kecil untuk angka & label
-  Widget _stat(String label, int count, Color color) {
+  Widget _statItem(String label, int val, Color color) {
     return Column(
-      mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          count.toString(),
+          "$val",
           style: TextStyle(
-            fontSize: 20,
+            fontSize: 18,
             fontWeight: FontWeight.bold,
             color: color,
           ),
         ),
         const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.grey[600],
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
+        Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
       ],
-    );
-  }
-}
-
-// ====================== SIDEBAR (MODIFIED) ==========================
-
-class AppSidebar extends StatefulWidget {
-  final TeacherProfile teacherProfile;
-  final Function(String) onKelasTap; // Callback saat kelas diklik
-  final VoidCallback onDashboardTap; // Callback saat dashboard diklik
-  final String? selectedKelas; // Untuk highlight menu aktif
-
-  const AppSidebar({
-    super.key,
-    required this.teacherProfile,
-    required this.onKelasTap,
-    required this.onDashboardTap,
-    this.selectedKelas,
-  });
-
-  @override
-  State<AppSidebar> createState() => _AppSidebarState();
-}
-
-class _AppSidebarState extends State<AppSidebar> {
-  int _expandedIndex = -1; // Untuk melacak accordion mana yang terbuka
-
-  Future<void> _handleLogout() async {
-    await _supabase.auth.signOut();
-    if (mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (context) => const LoginScreen()),
-        (route) => false,
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final List<String> tingkatKelas = widget.teacherProfile.kelasDiampu.keys
-        .toList();
-    tingkatKelas.sort();
-
-    // Menentukan apakah dashboard sedang aktif
-    bool isDashboardActive = widget.selectedKelas == null;
-
-    return Container(
-      width: 250,
-      color: Colors.white,
-      child: SafeArea(
-        child: Column(
-          children: [
-            // Header Sidebar
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'MTs Sunan Gunung Jati',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ),
-                  // Tombol tutup sidebar manual (Opsional untuk mobile)
-                  if (!MediaQuery.of(context).size.width.isInfinite &&
-                      MediaQuery.of(context).size.width < 800)
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () {
-                        Navigator.pop(context);
-                      },
-                    ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-
-            // Menu Items
-            Expanded(
-              child: ListView(
-                padding: EdgeInsets.zero,
-                children: [
-                  _buildMenuItem(
-                    icon: Icons.dashboard_outlined,
-                    title: 'Dashboard',
-                    isSelected: isDashboardActive,
-                    onTap: () {
-                      widget.onDashboardTap();
-
-                      Future.delayed(const Duration(milliseconds: 80), () {
-                        if (Navigator.canPop(context))
-                          Navigator.of(context).pop();
-                      });
-                    },
-                  ),
-
-                  // List Tingkat Kelas
-                  ...List.generate(tingkatKelas.length, (index) {
-                    final namaTingkat = tingkatKelas[index];
-                    final subMenus =
-                        widget.teacherProfile.kelasDiampu[namaTingkat]!;
-
-                    return _buildClassExpansionTile(
-                      title: namaTingkat,
-                      index: index,
-                      subMenus: subMenus,
-                    );
-                  }),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-
-            // Footer Profile
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 16.0,
-                vertical: 12.0,
-              ),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 18,
-                    backgroundColor: Colors.grey.shade200,
-                    backgroundImage: widget.teacherProfile.avatarUrl != null
-                        ? NetworkImage(widget.teacherProfile.avatarUrl!)
-                        : null,
-                    child: widget.teacherProfile.avatarUrl == null
-                        ? const Icon(Icons.person, color: Colors.grey)
-                        : null,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      widget.teacherProfile.nama,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(
-                      Icons.logout,
-                      color: Colors.redAccent,
-                      size: 20,
-                    ),
-                    tooltip: 'Logout',
-                    onPressed: _handleLogout,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMenuItem({
-    required IconData icon,
-    required String title,
-    required bool isSelected,
-    required VoidCallback onTap,
-  }) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: isSelected ? Colors.blue.shade700 : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: ListTile(
-        dense: true,
-        leading: Icon(
-          icon,
-          color: isSelected ? Colors.white : Colors.grey[700],
-        ),
-        title: Text(
-          title,
-          style: TextStyle(
-            color: isSelected ? Colors.white : Colors.black,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
-        onTap: onTap,
-      ),
-    );
-  }
-
-  Widget _buildSubMenuItem({
-    required String title,
-    required bool isSelected,
-    required VoidCallback onTap,
-  }) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: isSelected ? Colors.blue.shade700 : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: ListTile(
-        dense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-        title: Text(
-          title,
-          style: TextStyle(
-            color: isSelected ? Colors.white : Colors.black87,
-            fontSize: 14,
-          ),
-        ),
-        onTap: onTap,
-      ),
-    );
-  }
-
-  Widget _buildClassExpansionTile({
-    required String title,
-    required int index,
-    required List<String> subMenus,
-  }) {
-    // Cek apakah salah satu submenu (kelas) di dalam grup ini sedang dipilih
-    bool isGroupContainsSelected = subMenus.contains(widget.selectedKelas);
-
-    return Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        initiallyExpanded: isGroupContainsSelected || _expandedIndex == index,
-        onExpansionChanged: (expanded) {
-          setState(() {
-            _expandedIndex = expanded ? index : -1;
-          });
-        },
-        leading: Icon(
-          Icons.class_outlined,
-          color: isGroupContainsSelected ? Colors.blue[800] : Colors.grey[700],
-        ),
-        title: Text(
-          title,
-          style: TextStyle(
-            fontWeight: isGroupContainsSelected
-                ? FontWeight.bold
-                : FontWeight.normal,
-            color: isGroupContainsSelected ? Colors.blue[800] : Colors.black,
-          ),
-        ),
-        childrenPadding: const EdgeInsets.only(left: 16),
-        children: subMenus.map((namaKelas) {
-          return _buildSubMenuItem(
-            title: namaKelas,
-            isSelected: widget.selectedKelas == namaKelas,
-            onTap: () {
-              widget.onKelasTap(namaKelas);
-
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (Scaffold.of(context).isDrawerOpen) {
-                  Scaffold.of(context).closeDrawer();
-                }
-              });
-            },
-          );
-        }).toList(),
-      ),
     );
   }
 }

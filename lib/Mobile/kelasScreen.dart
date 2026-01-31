@@ -1,452 +1,147 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'editSiswa.dart';
+import 'package:provider/provider.dart';
+import 'kelas_logic.dart';
+import 'editSiswa.dart'; // Pastikan file ini ada
 
-class Absensi {
-  final String status;
-  final String? tanggal;
-  final String? fileUrlSurat;
-  final String? jenisSurat;
-  final String? statusVerifikasi;
-
-  Absensi({
-    required this.status,
-    this.tanggal,
-    this.fileUrlSurat,
-    this.jenisSurat,
-    this.statusVerifikasi,
-  });
-}
-
-class Siswa {
-  final int id;
-  final int no;
-  final String nama;
-  final String statusSiswa;
-  final Absensi absensiHariIni;
-  final String? suratUrlHariIni;
-
-  Siswa({
-    required this.id,
-    required this.no,
-    required this.nama,
-    required this.statusSiswa,
-    required this.absensiHariIni,
-    this.suratUrlHariIni,
-  });
-
-  factory Siswa.fromJson(Map<String, dynamic> json) {
-    final absensiList = json['absensi'] as List<dynamic>? ?? [];
-    final suratList = json['surat'] as List<dynamic>? ?? [];
-    final today = DateTime.now().toIso8601String().split('T').first;
-
-    final absensiTodayMap = absensiList
-        .cast<Map<String, dynamic>?>()
-        .firstWhere((a) => a?['tanggal'] == today, orElse: () => null);
-
-    final suratTodayMap = suratList.cast<Map<String, dynamic>?>().firstWhere(
-      (s) => s?['tanggal'] == today,
-      orElse: () => null,
-    );
-
-    final absensi = Absensi(
-      status: _capitalize(absensiTodayMap?['status'] ?? 'Alfa'),
-      tanggal: absensiTodayMap?['tanggal'],
-    );
-
-    final suratUrl = suratTodayMap?['file_url'] as String?;
-
-    return Siswa(
-      id: json['id'] ?? 0,
-      no: json['no'] ?? 0,
-      nama: json['nama'] ?? 'Tanpa Nama',
-      statusSiswa: json['status'] ?? 'aktif',
-      absensiHariIni: absensi,
-      suratUrlHariIni: suratUrl,
-    );
-  }
-
-  static String _capitalize(String value) {
-    if (value.isEmpty) return value;
-    return value[0].toUpperCase() + value.substring(1);
-  }
-}
-
-/// =======================
-/// SCREEN: KELAS
-/// =======================
-
-class KelasScreen extends StatefulWidget {
+class KelasScreen extends StatelessWidget {
   final String namaKelas;
 
   const KelasScreen({super.key, required this.namaKelas});
 
   @override
-  State<KelasScreen> createState() => _KelasScreenState();
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (_) => KelasLogic()..init(namaKelas),
+      child: const _KelasScreenView(),
+    );
+  }
 }
 
-class _KelasScreenState extends State<KelasScreen> {
-  final _supabase = Supabase.instance.client;
-  final _searchController = TextEditingController();
-
-  // 2. Tambahkan variabel Timer untuk auto refresh
-  Timer? _autoRefreshTimer;
-  Timer? _debounce;
-
-  List<Siswa> _originalSiswaList = [];
-  List<Siswa> _filteredSiswaList = [];
-
-  bool _isLoading = true;
-  String? _errorMessage;
-
-  @override
-  void initState() {
-    super.initState();
-    _fetchData(); // Fetch pertama kali (pakai loading)
-
-    // 3. Jalankan Auto Refresh setiap 5 detik
-    _startAutoRefresh();
-
-    _searchController.addListener(_filterSiswa);
-  }
-
-  @override
-  void dispose() {
-    _searchController.removeListener(_filterSiswa);
-    _searchController.dispose();
-    _debounce?.cancel();
-
-    // 4. PENTING: Matikan timer saat keluar layar agar tidak memakan memori
-    _autoRefreshTimer?.cancel();
-
-    super.dispose();
-  }
-
-  // Fungsi untuk memulai timer
-  void _startAutoRefresh() {
-    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
-      // Panggil fetch data dengan mode 'background' (tanpa loading spinner)
-      _fetchData(isBackground: true);
-    });
-  }
-
-  void _filterSiswa() {
-    final query = _searchController.text.toLowerCase();
-    setState(() {
-      if (query.isEmpty) {
-        _filteredSiswaList = _originalSiswaList;
-      } else {
-        _filteredSiswaList = _originalSiswaList
-            .where((siswa) => siswa.nama.toLowerCase().contains(query))
-            .toList();
-      }
-    });
-  }
-
-  /// ✅ Ambil semua siswa + absensi + surat
-  /// Tambahkan parameter [isBackground] untuk silent refresh
-  Future<void> _fetchData({bool isBackground = false}) async {
-    if (!mounted) return;
-
-    // Hanya tampilkan loading spinner jika BUKAN background refresh
-    if (!isBackground) {
-      setState(() {
-        _isLoading = true;
-        _errorMessage = null;
-      });
-    }
-
-    try {
-      final kelasResponse = await _supabase
-          .from('kelas')
-          .select('id')
-          .eq('nama_kelas', widget.namaKelas)
-          .maybeSingle();
-
-      if (kelasResponse == null || kelasResponse['id'] == null) {
-        throw Exception(
-          "Kelas '${widget.namaKelas}' tidak ditemukan di database.",
-        );
-      }
-
-      final kelasId = kelasResponse['id'];
-
-      final data = await _supabase
-          .from('siswa')
-          .select(
-            'id, no, nama, status, absensi(status, tanggal), surat(file_url, tanggal)',
-          )
-          .eq('kelas_id', kelasId)
-          .order('no', ascending: true);
-
-      if (!mounted) return;
-
-      final newList = (data as List<dynamic>)
-          .map((item) => Siswa.fromJson(item))
-          .toList();
-
-      setState(() {
-        _originalSiswaList = newList;
-
-        // 5. Logic agar pencarian tidak ter-reset saat auto refresh
-        if (_searchController.text.isNotEmpty) {
-          _filterSiswa(); // Terapkan ulang filter jika ada teks pencarian
-        } else {
-          _filteredSiswaList = _originalSiswaList;
-        }
-      });
-    } catch (e) {
-      if (!mounted) return;
-      // Jika background refresh gagal, jangan ganggu user dengan error screen penuh,
-      // cukup print di console saja.
-      if (isBackground) {
-        debugPrint("Background refresh error: $e");
-      } else {
-        setState(
-          () => _errorMessage = e.toString().replaceFirst("Exception: ", ""),
-        );
-      }
-    } finally {
-      if (!mounted) return;
-      // Matikan loading hanya jika bukan background process
-      if (!isBackground) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  Future<void> _handleRefresh() async {
-    _searchController.clear();
-    // Manual refresh: Tampilkan loading
-    await _fetchData(isBackground: false);
-  }
-
-  void _navigateToEdit(Siswa siswa) {
-    // Matikan auto refresh sementara saat pindah halaman
-    _autoRefreshTimer?.cancel();
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => EditSiswaScreen(
-          id: siswa.id,
-          no: siswa.no.toString(),
-          nama: siswa.nama,
-          suratUrl: siswa.suratUrlHariIni,
-        ),
-      ),
-    ).then((isSuccess) {
-      // Nyalakan lagi auto refresh saat kembali
-      _startAutoRefresh();
-
-      if (isSuccess == true) {
-        // Refresh langsung agar update terlihat instan
-        _handleRefresh();
-        ScaffoldMessenger.of(context)
-          ..hideCurrentSnackBar()
-          ..showSnackBar(
-            SnackBar(
-              content: Text('Data ${siswa.nama} berhasil diperbarui!'),
-              backgroundColor: Colors.green,
-            ),
-          );
-      }
-    });
-  }
-
-  /// =======================
-  /// UI SECTION (Tidak Ada Perubahan Besar)
-  /// =======================
+class _KelasScreenView extends StatelessWidget {
+  const _KelasScreenView();
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      resizeToAvoidBottomInset: false,
-      appBar: null,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: RefreshIndicator(
-                onRefresh: _handleRefresh,
-                child: CustomScrollView(
-                  slivers: [
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Column(
-                          children: [
-                            _buildSearchBar(),
-                            const SizedBox(height: 20),
-                            _buildTableHeader(),
-                          ],
-                        ),
-                      ),
-                    ),
-                    _buildSliverBody(),
-                  ],
-                ),
-              ),
-            ),
-            _buildFooter(),
-          ],
-        ),
-      ),
-    );
-  }
+    final logic = context.watch<KelasLogic>();
 
-  Widget _buildSliverBody() {
-    if (_isLoading) {
-      return const SliverFillRemaining(
-        child: Center(child: CircularProgressIndicator()),
-      );
-    }
-    if (_errorMessage != null) {
-      return SliverFillRemaining(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F7FA),
+      // App Bar sederhana untuk navigasi kembali
+      appBar: AppBar(
+        title: Text(logic.currentClassName),
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+        elevation: 0,
+      ),
+      body: Column(
+        children: [
+          // --- HEADER & SEARCH ---
+          Container(
+            padding: const EdgeInsets.all(16),
+            color: Colors.white,
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Text(
-                  "😢 Gagal Memuat Data",
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                TextField(
+                  controller: logic.searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Cari nama siswa...',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: logic.searchController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear),
+                            onPressed: () => logic.searchController.clear(),
+                          )
+                        : null,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Colors.grey),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                    filled: true,
+                    fillColor: Colors.grey.shade50,
+                  ),
                 ),
-                const SizedBox(height: 8),
-                Text(_errorMessage!, textAlign: TextAlign.center),
                 const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: _handleRefresh,
-                  child: const Text('Coba Lagi'),
+                // Header Tabel
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 12,
+                    horizontal: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                    children: [
+                      _HeaderCell('No', flex: 1),
+                      _HeaderCell('Nama', flex: 4, alignLeft: true),
+                      _HeaderCell('Status', flex: 2),
+                      _HeaderCell('Aksi', flex: 2),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
-        ),
-      );
-    }
 
-    if (_filteredSiswaList.isEmpty) {
-      return SliverFillRemaining(
-        child: Center(
-          child: Text(
-            _searchController.text.isEmpty
-                ? "Tidak ada data siswa."
-                : "Siswa '${_searchController.text}' tidak ditemukan.",
-          ),
-        ),
-      );
-    }
-
-    return SliverPadding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      sliver: SliverList.separated(
-        itemCount: _filteredSiswaList.length,
-        itemBuilder: (context, index) =>
-            _buildTableRow(_filteredSiswaList[index], index + 1),
-        separatorBuilder: (context, index) =>
-            const Divider(height: 1, indent: 16, endIndent: 16),
-      ),
-    );
-  }
-
-  // Tambahkan parameter nomorUrut
-  Widget _buildTableRow(Siswa siswa, int nomorUrut) {
-    final bool isTerlambat =
-        siswa.absensiHariIni.status.toLowerCase() == 'terlambat';
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Row(
-        children: [
-          // GANTI DI SINI: Jangan pakai siswa.no, tapi pakai nomorUrut
-          _TableCell(nomorUrut.toString(), flex: 1),
-
-          _TableCell(siswa.nama, flex: 3, isName: true),
-          _TableCell(siswa.absensiHariIni.status, flex: 3),
+          // --- LIST CONTENT ---
           Expanded(
-            flex: 2,
-            child: Center(
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  foregroundColor: Colors.white,
-                  disabledBackgroundColor: Colors.grey.shade300,
-                  disabledForegroundColor: Colors.grey.shade600,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
+            child: logic.isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : logic.errorMessage.isNotEmpty
+                ? _buildErrorState(context, logic)
+                : RefreshIndicator(
+                    onRefresh: () async => await logic.fetchData(),
+                    child: logic.filteredList.isEmpty
+                        ? _buildEmptyState()
+                        : ListView.separated(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            itemCount: logic.filteredList.length,
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              final item = logic.filteredList[index];
+                              return _SiswaRowItem(
+                                key: ValueKey(item['id']),
+                                item: item,
+                                index: index + 1,
+                              );
+                            },
+                          ),
                   ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 8,
-                  ),
-                ),
-                onPressed: isTerlambat ? null : () => _navigateToEdit(siswa),
-                child: const Text('Edit'),
-              ),
-            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildSearchBar() {
-    return TextField(
-      controller: _searchController,
-      decoration: InputDecoration(
-        hintText: 'Cari nama siswa...',
-        prefixIcon: const Icon(Icons.search),
-        suffixIcon: IconButton(
-          icon: const Icon(Icons.clear),
-          onPressed: () => _searchController.clear(),
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.grey),
-        ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+  Widget _buildEmptyState() {
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      child: Container(
+        height: 400,
+        alignment: Alignment.center,
+        child: const Text("Tidak ada data siswa ditemukan."),
       ),
     );
   }
 
-  Widget _buildTableHeader() {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade200,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: const Row(
-        children: [
-          _TableHeaderCell('No', flex: 1),
-          _TableHeaderCell('Nama', flex: 3),
-          _TableHeaderCell('Status', flex: 3),
-          _TableHeaderCell('Aksi', flex: 2),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFooter() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
+  Widget _buildErrorState(BuildContext context, KelasLogic logic) {
+    return Center(
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Image.asset(
-            'assets/logoMts.png',
-            height: 70,
-            errorBuilder: (context, error, stackTrace) {
-              return const Icon(Icons.school, size: 70, color: Colors.grey);
-            },
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            "MTS Sunan Gunung Jati",
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          const Icon(Icons.error_outline, size: 48, color: Colors.red),
+          const SizedBox(height: 16),
+          Text(logic.errorMessage, textAlign: TextAlign.center),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: () => logic.fetchData(),
+            child: const Text("Coba Lagi"),
           ),
         ],
       ),
@@ -454,10 +149,125 @@ class _KelasScreenState extends State<KelasScreen> {
   }
 }
 
-class _TableHeaderCell extends StatelessWidget {
+class _SiswaRowItem extends StatelessWidget {
+  final Map<String, dynamic> item;
+  final int index;
+
+  const _SiswaRowItem({super.key, required this.item, required this.index});
+
+  @override
+  Widget build(BuildContext context) {
+    final logic = context.read<KelasLogic>();
+    final statusText = logic.getStatusDisplay(item);
+    final statusColor = logic.getStatusColor(item);
+
+    // --- PERBAIKAN DI SINI ---
+    // Kita hapus variabel isSudahAbsen, isTerlambat, dan canEdit
+    // agar kode lebih bersih dan tidak ada warning.
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+      child: Row(
+        children: [
+          // No
+          Expanded(
+            flex: 1,
+            child: Text(
+              '${item['no'] ?? index}',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+          // Nama
+          Expanded(
+            flex: 4,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item['nama'] ?? '-',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (item['jam_masuk'] != null)
+                  Text(
+                    "Masuk: ${item['jam_masuk'].toString().substring(0, 5)}",
+                    style: const TextStyle(fontSize: 10, color: Colors.grey),
+                  ),
+              ],
+            ),
+          ),
+          // Status Badge
+          Expanded(
+            flex: 2,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: statusColor.withOpacity(0.5),
+                    width: 0.5,
+                  ),
+                ),
+                child: Text(
+                  statusText,
+                  style: TextStyle(
+                    color: statusColor,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          ),
+          // Aksi (Edit Button)
+          Expanded(
+            flex: 2,
+            child: Center(
+              child: IconButton(
+                icon: const Icon(Icons.edit_note, color: Colors.blue),
+                // --- PERBAIKAN TOMBOL ---
+                // Hapus pengecekan 'canEdit ? ... : null'
+                // Tombol selalu aktif agar guru bisa revisi kesalahan kapan saja
+                onPressed: () async {
+                  // Navigasi ke EditSiswaScreen
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => EditSiswaScreen(
+                        siswaId: item['id'],
+                        tanggal: DateTime.now(),
+                        no: item['no'].toString(),
+                        nama: item['nama'],
+                        suratUrl: item['file_url'], // URL Surat dari RPC
+                      ),
+                    ),
+                  );
+                  // Refresh data setelah kembali
+                  if (context.mounted) logic.fetchData();
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeaderCell extends StatelessWidget {
   final String text;
   final int flex;
-  const _TableHeaderCell(this.text, {required this.flex});
+  final bool alignLeft;
+
+  const _HeaderCell(this.text, {required this.flex, this.alignLeft = false});
 
   @override
   Widget build(BuildContext context) {
@@ -465,32 +275,11 @@ class _TableHeaderCell extends StatelessWidget {
       flex: flex,
       child: Text(
         text,
-        textAlign: TextAlign.center,
+        textAlign: alignLeft ? TextAlign.left : TextAlign.center,
         style: const TextStyle(
           fontWeight: FontWeight.bold,
           color: Colors.black87,
-        ),
-      ),
-    );
-  }
-}
-
-class _TableCell extends StatelessWidget {
-  final String text;
-  final int flex;
-  final bool isName;
-
-  const _TableCell(this.text, {required this.flex, this.isName = false});
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      flex: flex,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4.0),
-        child: Text(
-          text,
-          textAlign: isName ? TextAlign.left : TextAlign.center,
+          fontSize: 13,
         ),
       ),
     );

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'auth.dart'; // Import wrapper
+// Import wrapper dengan nama yang benar (sesuai file sebelumnya)
+import 'auth.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -27,24 +28,22 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _handleLogin() async {
-    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
-      _showErrorSnackbar("Email dan Password tidak boleh kosong.");
+    // 1. Gunakan validator form bawaan Flutter
+    if (!_formKey.currentState!.validate()) {
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
     try {
-      // Tugas LoginScreen sekarang hanya otentikasi
+      // 2. Sign In
       await _supabase.auth.signInWithPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
 
       if (mounted) {
-        // Setelah berhasil, arahkan ke AuthWrapper untuk pengecekan peran
+        // 3. Pindah ke AuthWrapper untuk cek Role
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const AuthWrapper()),
@@ -53,13 +52,9 @@ class _LoginScreenState extends State<LoginScreen> {
     } on AuthException catch (e) {
       _showErrorSnackbar(e.message);
     } catch (e) {
-      _showErrorSnackbar('Terjadi kesalahan: ${e.toString()}');
+      _showErrorSnackbar('Gagal login: Periksa koneksi internet Anda.');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -68,162 +63,224 @@ class _LoginScreenState extends State<LoginScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: Theme.of(context).colorScheme.error,
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating, // Tampil melayang lebih modern
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final isKeyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
+    // LayoutBuilder membantu kita mengetahui ukuran layar yang tersedia
     return Scaffold(
-      resizeToAvoidBottomInset: true,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 60),
-              decoration: const BoxDecoration(
-                color: Color(0xFF2F6CB0),
-                borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(40),
-                ),
-              ),
-              child: Column(
-                children: const [
-                  Text(
-                    "Login",
-                    style: TextStyle(
-                      fontSize: 30,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    "Silahkan Login Untuk Melanjutkan",
-                    style: TextStyle(color: Colors.white70, fontSize: 14),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: SingleChildScrollView(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 40,
-                  ),
-                  child: Card(
-                    elevation: 4,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 24,
+      backgroundColor: Colors.white,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: IntrinsicHeight(
+                child: Column(
+                  children: [
+                    // --- HEADER ---
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.fromLTRB(24, 80, 24, 40),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF2F6CB0),
+                        borderRadius: BorderRadius.only(
+                          bottomLeft: Radius.circular(40),
+                          bottomRight: Radius.circular(
+                            40,
+                          ), // Tambah lengkungan kanan juga biar simetris
+                        ),
                       ),
-                      child: Form(
-                        key: _formKey,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            TextFormField(
-                              controller: _emailController,
-                              keyboardType: TextInputType.emailAddress,
-                              decoration: const InputDecoration(
-                                labelText: "Email",
-                                hintText: "Contoh: guru@sekolah.id",
-                                border: OutlineInputBorder(),
-                                prefixIcon: Icon(Icons.email),
-                              ),
+                      child: Column(
+                        children: const [
+                          Text(
+                            "Selamat Datang",
+                            style: TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
                             ),
-                            const SizedBox(height: 16),
-                            TextFormField(
-                              controller: _passwordController,
-                              obscureText: _obscurePassword,
-                              decoration: InputDecoration(
-                                labelText: "Password",
-                                hintText: "Password",
-                                border: const OutlineInputBorder(),
-                                prefixIcon: const Icon(Icons.lock),
-                                suffixIcon: IconButton(
-                                  icon: Icon(
-                                    _obscurePassword
-                                        ? Icons.visibility_off
-                                        : Icons.visibility,
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            "Silahkan login untuk melanjutkan",
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // --- FORM ---
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 32,
+                      ),
+                      child: Card(
+                        elevation: 4,
+                        shadowColor: Colors.black26,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Form(
+                            key: _formKey,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // EMAIL INPUT
+                                TextFormField(
+                                  controller: _emailController,
+                                  keyboardType: TextInputType.emailAddress,
+                                  textInputAction: TextInputAction.next,
+                                  decoration: InputDecoration(
+                                    labelText: "Email",
+                                    hintText: "guru@sekolah.id",
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    prefixIcon: const Icon(
+                                      Icons.email_outlined,
+                                    ),
                                   ),
-                                  onPressed: () {
-                                    setState(() {
-                                      _obscurePassword = !_obscurePassword;
-                                    });
+                                  validator: (value) {
+                                    if (value == null || value.isEmpty) {
+                                      return 'Email wajib diisi';
+                                    }
+                                    if (!value.contains('@')) {
+                                      return 'Format email tidak valid';
+                                    }
+                                    return null;
                                   },
                                 ),
-                              ),
-                            ),
-                            const SizedBox(height: 24),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton(
-                                onPressed: _isLoading ? null : _handleLogin,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF2F6CB0),
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 14,
+                                const SizedBox(height: 20),
+
+                                // PASSWORD INPUT
+                                TextFormField(
+                                  controller: _passwordController,
+                                  obscureText: _obscurePassword,
+                                  textInputAction: TextInputAction.done,
+                                  onFieldSubmitted: (_) =>
+                                      _handleLogin(), // Enter langsung login
+                                  decoration: InputDecoration(
+                                    labelText: "Password",
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    prefixIcon: const Icon(Icons.lock_outline),
+                                    suffixIcon: IconButton(
+                                      icon: Icon(
+                                        _obscurePassword
+                                            ? Icons.visibility_off
+                                            : Icons.visibility,
+                                      ),
+                                      onPressed: () {
+                                        setState(() {
+                                          _obscurePassword = !_obscurePassword;
+                                        });
+                                      },
+                                    ),
                                   ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8),
+                                  validator: (value) {
+                                    if (value == null || value.isEmpty) {
+                                      return 'Password wajib diisi';
+                                    }
+                                    return null;
+                                  },
+                                ),
+                                const SizedBox(height: 32),
+
+                                // LOGIN BUTTON
+                                SizedBox(
+                                  width: double.infinity,
+                                  height: 50,
+                                  child: ElevatedButton(
+                                    onPressed: _isLoading ? null : _handleLogin,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF2F6CB0),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      elevation: 2,
+                                    ),
+                                    child: _isLoading
+                                        ? const SizedBox(
+                                            height: 24,
+                                            width: 24,
+                                            child: CircularProgressIndicator(
+                                              color: Colors.white,
+                                              strokeWidth: 2.5,
+                                            ),
+                                          )
+                                        : const Text(
+                                            "MASUK",
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.white,
+                                              letterSpacing: 1,
+                                            ),
+                                          ),
                                   ),
                                 ),
-                                child: _isLoading
-                                    ? const SizedBox(
-                                        height: 20,
-                                        width: 20,
-                                        child: CircularProgressIndicator(
-                                          color: Colors.white,
-                                          strokeWidth: 3,
-                                        ),
-                                      )
-                                    : const Text(
-                                        "Login",
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                              ),
+                              ],
                             ),
-                          ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ),
-              ),
-            ),
-            if (!isKeyboardVisible)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 32.0),
-                child: Column(
-                  children: [
-                    Image.asset('assets/logoMts.png', height: 80),
-                    const SizedBox(height: 8),
-                    const Text(
-                      "MTS Sunan Gunung Jati",
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
+
+                    // Spacer agar footer turun ke bawah
+                    const Spacer(),
+
+                    // --- FOOTER (LOGO) ---
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 32),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Image.asset(
+                            'assets/Logo MTS.png', // Pastikan nama file aset benar
+                            height: 60,
+                            errorBuilder: (context, error, stackTrace) {
+                              return const Icon(
+                                Icons.school,
+                                size: 60,
+                                color: Colors.grey,
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          const Text(
+                            "MTS Sunan Gunung Jati",
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: Colors.grey,
+                            ),
+                          ),
+                          const Text(
+                            "Versi 1.0.0",
+                            style: TextStyle(fontSize: 12, color: Colors.grey),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
               ),
-          ],
-        ),
+            ),
+          );
+        },
       ),
     );
   }
 }
-

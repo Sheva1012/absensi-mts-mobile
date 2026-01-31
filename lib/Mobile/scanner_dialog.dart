@@ -3,7 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 
-import 'scanner.dart';
+import 'scanner.dart'; // Pastikan ini mengarah ke file Scanner Widget Anda
 
 final SupabaseClient supabase = Supabase.instance.client;
 
@@ -21,146 +21,156 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
   DateTime _lastScanTime = DateTime.now();
   Color _borderColor = Colors.red;
 
-  // --- 2. FUNGSI DIGANTI MENGGUNAKAN FLUTTERTOAST ---
+  // Cache Jam Kelas untuk mengurangi query berulang
+  final Map<int, Map<String, String>> _kelasJamCache = {};
+
   void _showToast(String message, {Color color = Colors.green}) {
-    if (!mounted) return;
+    // Cancel toast sebelumnya agar tidak menumpuk
+    Fluttertoast.cancel();
 
     Fluttertoast.showToast(
       msg: message,
-      toastLength: Toast.LENGTH_SHORT, // Durasi 1 detik
-      gravity: ToastGravity.CENTER, // Posisi di tengah, seperti popup Anda
+      toastLength: Toast.LENGTH_SHORT,
+      gravity: ToastGravity.CENTER,
       backgroundColor: color,
       textColor: Colors.white,
-      fontSize: 18.0, 
+      fontSize: 16.0,
     );
   }
-  // --- AKHIR PERUBAHAN FUNGSI ---
 
- Future<void> _prosesAbsensi(
+  Future<void> _prosesAbsensi(
     int siswaId,
     String namaSiswa,
     int? kelasId,
   ) async {
-    final today = DateTime.now().toIso8601String().substring(0, 10);
-    final now = DateTime.now();
-    final String jamScanStr = now.toIso8601String().substring(11, 19);
+    final today = DateTime.now();
+    final todayStr = DateFormat('yyyy-MM-dd').format(today);
+    final jamScanStr = DateFormat('HH:mm:ss').format(today);
 
-    // Default jam
-    const String defaultJamMasuk = "07:00:00";
-    const String defaultJamPulang = "14:00:00";
-    String jamMasukKelasStr = defaultJamMasuk;
-    String jamPulangKelasStr = defaultJamPulang;
+    // Default Jam
+    String jamMasukKelasStr = "07:00:00";
+    String jamPulangKelasStr = "14:00:00";
 
+    // 1. Ambil Jam Kelas (Cek Cache dulu)
     if (kelasId != null) {
-      try {
-        final kelasRes = await supabase
-            .from('kelas')
-            .select('jam_masuk, jam_pulang')
-            .eq('id', kelasId)
-            .single();
+      if (_kelasJamCache.containsKey(kelasId)) {
+        jamMasukKelasStr = _kelasJamCache[kelasId]!['masuk']!;
+        jamPulangKelasStr = _kelasJamCache[kelasId]!['pulang']!;
+      } else {
+        try {
+          final kelasRes = await supabase
+              .from('kelas')
+              .select('jam_masuk, jam_pulang')
+              .eq('id', kelasId)
+              .maybeSingle();
 
-        jamMasukKelasStr =
-            (kelasRes['jam_masuk'] as String?) ?? defaultJamMasuk;
-        jamPulangKelasStr =
-            (kelasRes['jam_pulang'] as String?) ?? defaultJamPulang;
-      } catch (e) {
-        print("Error cari jam: $e. Menggunakan default.");
+          if (kelasRes != null) {
+            jamMasukKelasStr = (kelasRes['jam_masuk'] as String?) ?? "07:00:00";
+            jamPulangKelasStr =
+                (kelasRes['jam_pulang'] as String?) ?? "14:00:00";
+
+            // Simpan ke cache
+            _kelasJamCache[kelasId] = {
+              'masuk': jamMasukKelasStr,
+              'pulang': jamPulangKelasStr,
+            };
+          }
+        } catch (e) {
+          debugPrint("Error jam kelas: $e");
+        }
       }
     }
 
-    // Ambil data absensi hari ini
-    final existingList = await supabase
+    // 2. Cek Data Absensi Hari Ini
+    final existingData = await supabase
         .from('absensi')
         .select()
         .eq('siswa_id', siswaId)
-        .eq('tanggal', today);
+        .eq('tanggal', todayStr)
+        .maybeSingle(); // Lebih efisien daripada list.first
 
-    // Variabel pembantu untuk mendeteksi status data
-    final Map<String, dynamic>? existingData =
-        existingList.isNotEmpty ? existingList.first : null;
-    
-    // LOGIKA UTAMA: Deteksi apakah ini Scan Masuk atau Pulang
-    // Dianggap 'Belum Masuk' jika:
-    // 1. Data belum ada sama sekali (Siswa baru), ATAU
-    // 2. Data ada (dari Cron Job), tapi kolom 'waktu_masuk' masih NULL
-    final bool isBelumAbsenMasuk = existingData == null || existingData['waktu_masuk'] == null;
+    // LOGIKA UTAMA
+    // Dianggap 'Belum Masuk' jika data tidak ada, atau kolom waktu_masuk NULL
+    final bool isBelumAbsenMasuk =
+        existingData == null || existingData['waktu_masuk'] == null;
 
     if (isBelumAbsenMasuk) {
-      // === LOGIKA ABSENSI MASUK ===
-      final tglHariIniStr = DateFormat('yyyy-MM-dd').format(now);
-      final batasWaktuMasuk = DateTime.parse(
-        "$tglHariIniStr $jamMasukKelasStr",
-      );
+      // === SCAN MASUK ===
 
-      String statusAbsen = now.isAfter(batasWaktuMasuk) ? 'terlambat' : 'hadir';
+      // Parse Jam Batas
+      final batasWaktuMasuk = DateTime.parse("$todayStr $jamMasukKelasStr");
+
+      // Tentukan Status (Hadir / Terlambat)
+      // Gunakan 'today' (waktu scan) dibandingkan dengan batas waktu
+      String statusAbsen = today.isAfter(batasWaktuMasuk)
+          ? 'terlambat'
+          : 'hadir';
 
       if (existingData != null) {
-        // KASUS A: Data sudah ada (dari Cron Job 'Alfa') -> Lakukan UPDATE
-        await supabase.from('absensi').update({
-          'status': statusAbsen,
-          'waktu_masuk': jamScanStr,
-        }).eq('id', existingData['id']); // Update berdasarkan ID record yang sudah ada
+        // Kasus: Data sudah ada (misal dari Cron Job Alfa) -> Update
+        await supabase
+            .from('absensi')
+            .update({
+              'status': statusAbsen,
+              'waktu_masuk': jamScanStr,
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('id', existingData['id']);
       } else {
-        // KASUS B: Data belum ada (Siswa baru insert setelah cron jalan) -> Lakukan INSERT
+        // Kasus: Data baru -> Insert
         await supabase.from('absensi').insert({
           'siswa_id': siswaId,
-          'tanggal': today,
+          'tanggal': todayStr,
           'status': statusAbsen,
           'waktu_masuk': jamScanStr,
+          'created_at': DateTime.now().toIso8601String(),
         });
       }
 
-      if (mounted) setState(() => _borderColor = Colors.greenAccent);
-      
+      if (mounted) setState(() => _borderColor = Colors.green);
+
       if (statusAbsen == 'terlambat') {
-        _showToast(
-          '⏱️ Anda TERLAMBAT ($jamScanStr)\n$namaSiswa',
-          color: Colors.orange,
-        );
+        // Hitung keterlambatan (opsional, untuk info)
+        final diff = today.difference(batasWaktuMasuk).inMinutes;
+        _showToast('⚠️ TERLAMBAT $diff mnt\n$namaSiswa', color: Colors.orange);
       } else {
-        _showToast('✅ Absensi masuk tercatat ($jamScanStr)\n$namaSiswa');
+        _showToast('✅ MASUK BERHASIL\n$namaSiswa', color: Colors.green);
       }
-
     } else {
-      // === LOGIKA ABSENSI PULANG ===
-      // Masuk ke sini berarti 'waktu_masuk' SUDAH ADA isinya
-      
-      final waktuPulangTercatat = existingData['waktu_pulang']; // Aman pakai ! karena masuk else
-      final waktuMasukStr = existingData['waktu_masuk'];
+      // === SCAN PULANG ===
 
-      if (waktuPulangTercatat != null) {
+      // Validasi 1: Cek apakah sudah absen pulang sebelumnya
+      if (existingData['waktu_pulang'] != null) {
+        if (mounted) setState(() => _borderColor = Colors.orange);
         _showToast(
-          '⚠️ Sudah tercatat waktu pulang sebelumnya',
+          '⚠️ Sudah absen pulang sebelumnya\n$namaSiswa',
           color: Colors.orange,
         );
         return;
       }
 
-      // Cek delay minimal 5 menit
-      if (waktuMasukStr != null) {
-        final waktuMasukToday = DateTime.parse("$today $waktuMasukStr");
-        final durasi = now.difference(waktuMasukToday);
+      // Validasi 2: Delay minimal 1 menit dari waktu masuk (mencegah double scan tak sengaja)
+      final waktuMasukDb = existingData['waktu_masuk'] as String;
+      final dtWaktuMasuk = DateTime.parse("$todayStr $waktuMasukDb");
 
-        if (durasi.inMinutes < 5) {
-          _showToast(
-            '⏱️ Belum bisa absen pulang.\nTunggu ${5 - durasi.inMinutes} menit lagi.',
-            color: Colors.orange,
-          );
-          return;
-        }
-      }
-
-      // Cek Jam Pulang Resmi
-      final tglHariIniStr = DateFormat('yyyy-MM-dd').format(now);
-      final batasWaktuPulang = DateTime.parse(
-        "$tglHariIniStr $jamPulangKelasStr",
-      );
-
-      if (now.isBefore(batasWaktuPulang)) {
+      if (today.difference(dtWaktuMasuk).inSeconds < 60) {
         if (mounted) setState(() => _borderColor = Colors.orange);
         _showToast(
-          '🚫 Belum waktunya pulang. Jam pulang: ${jamPulangKelasStr.substring(0, 5)}',
+          '⏳ Tunggu sebentar sebelum absen pulang',
           color: Colors.orange,
+        );
+        return;
+      }
+
+      // Validasi 3: Cek Jam Pulang Resmi
+      final batasWaktuPulang = DateTime.parse("$todayStr $jamPulangKelasStr");
+
+      // Jika scan SEBELUM jam pulang, tolak (atau peringatkan)
+      if (today.isBefore(batasWaktuPulang)) {
+        if (mounted) setState(() => _borderColor = Colors.red);
+        _showToast(
+          '⛔ Belum jam pulang (${jamPulangKelasStr.substring(0, 5)})\n$namaSiswa',
+          color: Colors.red,
         );
         return;
       }
@@ -170,12 +180,13 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
           .from('absensi')
           .update({
             'waktu_pulang': jamScanStr,
-            'status': 'pulang', // Opsional: Tergantung kebutuhan, apakah status mau diubah jadi 'pulang' atau tetap 'hadir'
+            'status': 'pulang', // Ubah status jadi pulang
+            'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('id', existingData['id']);
 
-      if (mounted) setState(() => _borderColor = Colors.greenAccent);
-      _showToast('🏁 Absensi PULANG tercatat ($jamScanStr)\n$namaSiswa');
+      if (mounted) setState(() => _borderColor = Colors.blue);
+      _showToast('👋 PULANG BERHASIL\n$namaSiswa', color: Colors.blue);
     }
   }
 
@@ -183,8 +194,9 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
     if (_isProcessing) return;
 
     final now = DateTime.now();
+    // Debounce: Cegah scan code yang SAMA dalam waktu 2 detik
     if (result == _lastScan &&
-        now.difference(_lastScanTime).inMilliseconds < 1200) {
+        now.difference(_lastScanTime).inMilliseconds < 2000) {
       return;
     }
 
@@ -193,50 +205,44 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
 
     setState(() {
       _isProcessing = true;
-      _borderColor = Colors.blueAccent;
+      _borderColor = Colors.yellow; // Warna loading
     });
 
     try {
+      // Cari Siswa berdasarkan NIS
       final siswaRes = await supabase
           .from('siswa')
           .select('id, nama, kelas_id')
           .eq('nis', result)
-          .single();
+          .maybeSingle(); // Aman jika tidak ketemu
 
-      final int? siswaId = siswaRes['id'] as int?;
-      final String? namaSiswa = siswaRes['nama'] as String?;
-      final int? kelasId = siswaRes['kelas_id'] as int?;
-
-      if (siswaId == null || namaSiswa == null) {
-        throw Exception('Data siswa tidak lengkap di database');
+      if (siswaRes == null) {
+        throw "Siswa tidak ditemukan";
       }
+
+      final siswaId = siswaRes['id'] as int;
+      final namaSiswa = siswaRes['nama'] as String;
+      final kelasId = siswaRes['kelas_id'] as int?;
 
       await _prosesAbsensi(siswaId, namaSiswa, kelasId);
     } catch (e) {
-      String msg = '❌ Gagal absensi';
-      if (e is PostgrestException) {
-        if (e.code == 'PGRST116') {
-          msg = '❌ QR tidak valid\nSiswa tidak ditemukan';
-        } else if (e.code == '23505') {
-          // Kasus ini mungkin tidak terjadi lagi karena ada pengecekan waktu pulang
-          msg = '⚠️ Siswa sudah absen masuk hari ini';
-        }
-      } else if (e is FormatException) {
-        msg = '❌ Format QR tidak valid';
+      String msg = '❌ Gagal scan';
+      if (e.toString().contains("Siswa tidak ditemukan")) {
+        msg = '❌ NIS Tidak Terdaftar: $result';
       } else {
-        msg = '❌ QR tidak dikenal';
-        print(e.toString());
+        msg = '❌ Error: $e';
       }
 
       if (mounted) setState(() => _borderColor = Colors.red);
-      // --- 3. DIUBAH: HAPUS AWAIT & GANTI NAMA FUNGSI ---
       _showToast(msg, color: Colors.red);
     } finally {
-      await Future.delayed(const Duration(milliseconds: 800));
+      // Delay sejenak agar user lihat warna border status sebelum reset
+      await Future.delayed(const Duration(milliseconds: 1500));
       if (mounted) {
         setState(() {
           _isProcessing = false;
-          _borderColor = Colors.red;
+          _borderColor =
+              Colors.red; // Kembali ke standby (Merah = Kamera Nyala)
         });
       }
     }
@@ -244,6 +250,7 @@ class _ContinuousScannerDialogState extends State<ContinuousScannerDialog> {
 
   @override
   Widget build(BuildContext context) {
+    // Pastikan widget Scanner Anda menerima parameter borderColor
     return BarcodeScannerPage(onResult: _handleScan, borderColor: _borderColor);
   }
 }

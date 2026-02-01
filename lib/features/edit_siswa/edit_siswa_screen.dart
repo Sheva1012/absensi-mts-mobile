@@ -2,14 +2,16 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import 'editSiswa_logic.dart'; // Import Logic
+
+import '../../core/constants.dart';
+import 'edit_siswa_logic.dart';
 
 class EditSiswaScreen extends StatelessWidget {
   final int siswaId;
   final String no;
   final String nama;
   final DateTime tanggal;
-  final String? statusAwal; // Rename biar jelas ini data awal
+  final String? statusAwal;
   final String? suratUrl;
 
   const EditSiswaScreen({
@@ -18,7 +20,7 @@ class EditSiswaScreen extends StatelessWidget {
     required this.no,
     required this.nama,
     required this.tanggal,
-    this.statusAwal, // Rename parameter di constructor juga
+    this.statusAwal,
     this.suratUrl,
   });
 
@@ -66,17 +68,14 @@ class _EditSiswaFormState extends State<_EditSiswaForm> {
   @override
   void initState() {
     super.initState();
-    // Default status jika null adalah 'hadir'
     selectedStatus = widget.statusAwal?.toLowerCase() ?? 'hadir';
   }
 
   @override
   Widget build(BuildContext context) {
     final logic = context.watch<EditSiswaLogic>();
-
-    // Cek apakah butuh upload (Sakit/Izin)
-    final bool isButuhSurat =
-        (selectedStatus == 'sakit' || selectedStatus == 'izin');
+    final currentStatus = AttendanceStatus.fromValue(selectedStatus);
+    final isButuhSurat = currentStatus.requiresDocument;
 
     return Scaffold(
       appBar: AppBar(
@@ -93,18 +92,17 @@ class _EditSiswaFormState extends State<_EditSiswaForm> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Info Siswa Readonly
               _buildInfoCard(),
               const SizedBox(height: 24),
 
-              // Dropdown Status
+              // Status Dropdown
               const Text(
-                "Status Kehadiran",
+                'Status Kehadiran',
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
-                value: selectedStatus,
+                initialValue: selectedStatus,
                 decoration: InputDecoration(
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -115,13 +113,13 @@ class _EditSiswaFormState extends State<_EditSiswaForm> {
                   ),
                 ),
                 items: const [
-                  DropdownMenuItem(value: 'hadir', child: Text('Hadir ✅')),
-                  DropdownMenuItem(value: 'sakit', child: Text('Sakit 🏥')),
-                  DropdownMenuItem(value: 'izin', child: Text('Izin ✉️')),
-                  DropdownMenuItem(value: 'alpha', child: Text('Alpha ❌')),
+                  DropdownMenuItem(value: 'hadir', child: Text('Hadir')),
+                  DropdownMenuItem(value: 'sakit', child: Text('Sakit')),
+                  DropdownMenuItem(value: 'izin', child: Text('Izin')),
+                  DropdownMenuItem(value: 'alfa', child: Text('Alpha')),
                   DropdownMenuItem(
                     value: 'terlambat',
-                    child: Text('Terlambat ⏰'),
+                    child: Text('Terlambat'),
                   ),
                 ],
                 onChanged: (val) {
@@ -132,23 +130,22 @@ class _EditSiswaFormState extends State<_EditSiswaForm> {
               ),
               const SizedBox(height: 24),
 
-              // Area Upload Surat (Kondisional)
+              // Upload Section (Conditional)
               AnimatedOpacity(
                 opacity: isButuhSurat ? 1.0 : 0.5,
                 duration: const Duration(milliseconds: 300),
                 child: IgnorePointer(
-                  ignoring:
-                      !isButuhSurat, // Disable klik jika tidak butuh surat
+                  ignoring: !isButuhSurat,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        "Lampiran Surat (Opsional)",
+                        'Lampiran Surat (Opsional)',
                         style: TextStyle(fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 8),
 
-                      // Preview Gambar (File Baru atau URL Lama)
+                      // Preview
                       if (logic.selectedFile != null)
                         _buildFilePreview(logic.selectedFile!)
                       else if (widget.suratUrl != null &&
@@ -159,7 +156,7 @@ class _EditSiswaFormState extends State<_EditSiswaForm> {
 
                       const SizedBox(height: 12),
 
-                      // Tombol Aksi Kamera/Galeri
+                      // Action Buttons
                       Row(
                         children: [
                           Expanded(
@@ -167,7 +164,7 @@ class _EditSiswaFormState extends State<_EditSiswaForm> {
                               onPressed: () =>
                                   logic.pickImage(ImageSource.camera),
                               icon: const Icon(Icons.camera_alt),
-                              label: const Text("Kamera"),
+                              label: const Text('Kamera'),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -176,7 +173,7 @@ class _EditSiswaFormState extends State<_EditSiswaForm> {
                               onPressed: () =>
                                   logic.pickImage(ImageSource.gallery),
                               icon: const Icon(Icons.photo_library),
-                              label: const Text("Galeri"),
+                              label: const Text('Galeri'),
                             ),
                           ),
                         ],
@@ -188,13 +185,14 @@ class _EditSiswaFormState extends State<_EditSiswaForm> {
 
               const SizedBox(height: 40),
 
-              // Tombol Simpan
+              // Save Button
               SizedBox(
                 width: double.infinity,
                 height: 50,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blue[700],
+                    foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -218,10 +216,7 @@ class _EditSiswaFormState extends State<_EditSiswaForm> {
                                 backgroundColor: Colors.green,
                               ),
                             );
-                            Navigator.pop(
-                              context,
-                              true,
-                            ); // Kembali dengan result true (refresh)
+                            Navigator.pop(context, true);
                           } else {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
@@ -234,7 +229,7 @@ class _EditSiswaFormState extends State<_EditSiswaForm> {
                   child: logic.isLoading
                       ? const CircularProgressIndicator(color: Colors.white)
                       : const Text(
-                          "SIMPAN PERUBAHAN",
+                          'SIMPAN PERUBAHAN',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
@@ -260,11 +255,11 @@ class _EditSiswaFormState extends State<_EditSiswaForm> {
       ),
       child: Column(
         children: [
-          _infoRow("Nama Siswa", widget.nama),
+          _infoRow('Nama Siswa', widget.nama),
           const Divider(),
-          _infoRow("Nomor Absen", widget.no),
+          _infoRow('Nomor Absen', widget.no),
           const Divider(),
-          _infoRow("Tanggal Absensi", tglStr),
+          _infoRow('Tanggal Absensi', tglStr),
         ],
       ),
     );
@@ -309,7 +304,7 @@ class _EditSiswaFormState extends State<_EditSiswaForm> {
             color: Colors.grey[200],
             alignment: Alignment.center,
             child: const Text(
-              "Gagal memuat gambar",
+              'Gagal memuat gambar',
               style: TextStyle(color: Colors.grey),
             ),
           );
@@ -330,12 +325,12 @@ class _EditSiswaFormState extends State<_EditSiswaForm> {
           style: BorderStyle.solid,
         ),
       ),
-      child: Column(
+      child: const Column(
         mainAxisAlignment: MainAxisAlignment.center,
-        children: const [
+        children: [
           Icon(Icons.cloud_upload_outlined, size: 40, color: Colors.grey),
           SizedBox(height: 8),
-          Text("Belum ada lampiran", style: TextStyle(color: Colors.grey)),
+          Text('Belum ada lampiran', style: TextStyle(color: Colors.grey)),
         ],
       ),
     );

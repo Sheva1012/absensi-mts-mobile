@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+/// QR Code Scanner widget with camera and overlay
 class BarcodeScannerPage extends StatefulWidget {
   final void Function(String) onResult;
-  final Color borderColor; // Menerima warna dari Parent (ScannerDialog)
+  final Color borderColor;
 
   const BarcodeScannerPage({
     super.key,
@@ -16,15 +17,14 @@ class BarcodeScannerPage extends StatefulWidget {
 }
 
 class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
-  // Controller Scanner
   final MobileScannerController _controller = MobileScannerController(
-    facing: CameraFacing.front, // Default kamera depan
+    facing: CameraFacing.front,
     torchEnabled: false,
-    formats: [BarcodeFormat.qrCode], // Optimasi: Hanya scan QR
-    detectionSpeed: DetectionSpeed.normal, // Hemat baterai
+    formats: [BarcodeFormat.qrCode],
+    detectionSpeed: DetectionSpeed.normal,
   );
 
-  // Debounce lokal untuk mencegah spamming callback ke parent
+  // Local debounce
   String? _lastScanned;
   DateTime _lastScanTime = DateTime.now();
 
@@ -55,7 +55,7 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
       ),
       body: Stack(
         children: [
-          // 1. KAMERA SCANNER
+          // Camera Scanner
           MobileScanner(
             controller: _controller,
             onDetect: (capture) {
@@ -64,33 +64,29 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
                 final result = barcodes.first.rawValue;
                 final now = DateTime.now();
 
-                // Debounce Lokal: Cegah scan code yg sama dlm 1.5 detik
+                // Local debounce
                 if (result != null &&
                     (result != _lastScanned ||
                         now.difference(_lastScanTime).inMilliseconds > 1500)) {
                   _lastScanned = result;
                   _lastScanTime = now;
-
-                  // Kirim hasil ke Parent (ScannerDialog)
-                  // Parent yang akan mengubah warna border & proses DB
                   widget.onResult(result);
                 }
               }
             },
           ),
 
-          // 2. OVERLAY (GELAP + KOTAK)
-          // Menggunakan RepaintBoundary untuk performa
+          // Overlay
           RepaintBoundary(
             child: CustomPaint(
               size: MediaQuery.of(context).size,
               painter: ScannerOverlayPainter(
-                borderColor: widget.borderColor, // Pakai warna dari parent
+                borderColor: widget.borderColor,
               ),
             ),
           ),
 
-          // 3. TEKS INSTRUKSI
+          // Instructions
           const Positioned(
             bottom: 80,
             left: 0,
@@ -121,7 +117,7 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
             ),
           ),
 
-          // 4. Close Button (Floating)
+          // Close Button
           Positioned(
             top: 40,
             left: 16,
@@ -145,7 +141,7 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
   }
 }
 
-// PAINTER UNTUK OVERLAY
+/// Custom painter for scanner overlay
 class ScannerOverlayPainter extends CustomPainter {
   final Color borderColor;
 
@@ -153,53 +149,91 @@ class ScannerOverlayPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Area Gelap (Background)
-    final backgroundPath = Path()
-      ..addRect(Rect.fromLTWH(0, 0, size.width, size.height));
+    final double scanAreaSize = size.width * 0.7;
+    final double left = (size.width - scanAreaSize) / 2;
+    final double top = (size.height - scanAreaSize) / 2;
+    final Rect scanRect = Rect.fromLTWH(left, top, scanAreaSize, scanAreaSize);
 
-    // Area Kotak Scan (Bolong)
-    final scanWindowSize = 280.0;
-    final scanWindowRect = Rect.fromCenter(
-      center: Offset(size.width / 2, size.height / 2),
-      width: scanWindowSize,
-      height: scanWindowSize,
-    );
-
-    final cutOutPath = Path()
-      ..addRRect(
-        RRect.fromRectAndRadius(scanWindowRect, const Radius.circular(20)),
-      );
-
-    // Gabungkan (Background - Kotak)
-    final finalPath = Path.combine(
-      PathOperation.difference,
-      backgroundPath,
-      cutOutPath,
-    );
-
+    // Dark overlay outside scan area
     final backgroundPaint = Paint()
-      ..color = Colors.black
-          .withOpacity(0.6) // Gelap transparan
+      ..color = Colors.black.withValues(alpha: 0.6)
       ..style = PaintingStyle.fill;
 
-    canvas.drawPath(finalPath, backgroundPaint);
+    final path = Path()
+      ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
+      ..addRRect(
+        RRect.fromRectAndRadius(scanRect, const Radius.circular(12)),
+      )
+      ..fillType = PathFillType.evenOdd;
 
-    // Gambar Border Kotak (Warna Dinamis)
+    canvas.drawPath(path, backgroundPaint);
+
+    // Border around scan area
     final borderPaint = Paint()
       ..color = borderColor
       ..style = PaintingStyle.stroke
-      ..strokeWidth =
-          5 // Lebih tebal biar jelas
-      ..strokeCap = StrokeCap.round;
+      ..strokeWidth = 4;
 
-    // Gambar 4 Sudut (Corner) saja biar keren, atau Full Box
-    // Disini kita gambar Full Box Rounded
     canvas.drawRRect(
-      RRect.fromRectAndRadius(scanWindowRect, const Radius.circular(20)),
+      RRect.fromRectAndRadius(scanRect, const Radius.circular(12)),
       borderPaint,
     );
 
-    // Opsional: Tambahkan garis scan animasi di masa depan
+    // Corner decorations
+    final cornerLength = scanAreaSize * 0.15;
+    final cornerPaint = Paint()
+      ..color = borderColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 6
+      ..strokeCap = StrokeCap.round;
+
+    // Top-left corner
+    canvas.drawLine(
+      Offset(left, top + cornerLength),
+      Offset(left, top),
+      cornerPaint,
+    );
+    canvas.drawLine(
+      Offset(left, top),
+      Offset(left + cornerLength, top),
+      cornerPaint,
+    );
+
+    // Top-right corner
+    canvas.drawLine(
+      Offset(left + scanAreaSize - cornerLength, top),
+      Offset(left + scanAreaSize, top),
+      cornerPaint,
+    );
+    canvas.drawLine(
+      Offset(left + scanAreaSize, top),
+      Offset(left + scanAreaSize, top + cornerLength),
+      cornerPaint,
+    );
+
+    // Bottom-left corner
+    canvas.drawLine(
+      Offset(left, top + scanAreaSize - cornerLength),
+      Offset(left, top + scanAreaSize),
+      cornerPaint,
+    );
+    canvas.drawLine(
+      Offset(left, top + scanAreaSize),
+      Offset(left + cornerLength, top + scanAreaSize),
+      cornerPaint,
+    );
+
+    // Bottom-right corner
+    canvas.drawLine(
+      Offset(left + scanAreaSize - cornerLength, top + scanAreaSize),
+      Offset(left + scanAreaSize, top + scanAreaSize),
+      cornerPaint,
+    );
+    canvas.drawLine(
+      Offset(left + scanAreaSize, top + scanAreaSize - cornerLength),
+      Offset(left + scanAreaSize, top + scanAreaSize),
+      cornerPaint,
+    );
   }
 
   @override

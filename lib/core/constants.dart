@@ -104,7 +104,7 @@ abstract class AbsensiColumns {
   static const String keterangan = 'keterangan';
   static const String waktuMasuk = 'waktu_masuk';
   static const String waktuPulang = 'waktu_pulang';
-  static const String suratUrl = 'surat_url';
+  static const String updatedBy = 'updated_by';
   static const String createdAt = 'created_at';
   static const String updatedAt = 'updated_at';
 }
@@ -112,12 +112,10 @@ abstract class AbsensiColumns {
 abstract class SuratColumns {
   static const String id = 'id';
   static const String siswaId = 'siswa_id';
-  static const String tipe = 'tipe';
+  static const String jenis = 'jenis';
   static const String tanggal = 'tanggal';
-  static const String alasan = 'alasan';
-  static const String keterangan = 'keterangan';
+  static const String fileUrl = 'file_url';
   static const String createdAt = 'created_at';
-  static const String updatedAt = 'updated_at';
 }
 
 // ============================================================================
@@ -128,7 +126,8 @@ abstract class SuratColumns {
 enum StudentStatus {
   aktif('aktif', 'Aktif'),
   lulus('lulus', 'Lulus'),
-  tidakAktif('tidak aktif', 'Tidak Aktif');
+  pindah('pindah', 'Pindah'),
+  keluar('keluar', 'Keluar');
 
   final String value;
   final String displayName;
@@ -237,7 +236,8 @@ abstract class StatusColors {
   static const Map<String, Color> studentStatusColors = {
     'aktif': Color(0xFF4CAF50), // Green
     'lulus': Color(0xFF2196F3), // Blue
-    'tidak aktif': Color(0xFFFF5722), // Deep Orange
+    'pindah': Color(0xFFFF9800), // Orange
+    'keluar': Color(0xFFFF5722), // Deep Orange
   };
 
   /// Get color for attendance status

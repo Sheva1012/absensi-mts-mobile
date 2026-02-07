@@ -9,7 +9,6 @@ class Absensi {
   final String? keterangan;
   final String? waktuMasuk;
   final String? waktuPulang;
-  final String? suratUrl;
   final DateTime createdAt;
   final DateTime? updatedAt;
 
@@ -21,7 +20,6 @@ class Absensi {
     this.keterangan,
     this.waktuMasuk,
     this.waktuPulang,
-    this.suratUrl,
     required this.createdAt,
     this.updatedAt,
   });
@@ -40,7 +38,6 @@ class Absensi {
       keterangan: json[AbsensiColumns.keterangan] as String?,
       waktuMasuk: json[AbsensiColumns.waktuMasuk] as String?,
       waktuPulang: json[AbsensiColumns.waktuPulang] as String?,
-      suratUrl: json[AbsensiColumns.suratUrl] as String?,
       createdAt: json[AbsensiColumns.createdAt] != null
           ? DateTime.parse(json[AbsensiColumns.createdAt] as String)
           : DateTime.now(),
@@ -59,7 +56,6 @@ class Absensi {
         AbsensiColumns.keterangan: keterangan,
         AbsensiColumns.waktuMasuk: waktuMasuk,
         AbsensiColumns.waktuPulang: waktuPulang,
-        AbsensiColumns.suratUrl: suratUrl,
         AbsensiColumns.createdAt: createdAt.toIso8601String(),
         AbsensiColumns.updatedAt: updatedAt?.toIso8601String(),
       };
@@ -72,7 +68,6 @@ class Absensi {
         AbsensiColumns.keterangan: keterangan,
         AbsensiColumns.waktuMasuk: waktuMasuk,
         AbsensiColumns.waktuPulang: waktuPulang,
-        AbsensiColumns.suratUrl: suratUrl,
         AbsensiColumns.createdAt: DateTime.now().toIso8601String(),
       };
 
@@ -85,7 +80,6 @@ class Absensi {
     String? keterangan,
     String? waktuMasuk,
     String? waktuPulang,
-    String? suratUrl,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -97,7 +91,6 @@ class Absensi {
       keterangan: keterangan ?? this.keterangan,
       waktuMasuk: waktuMasuk ?? this.waktuMasuk,
       waktuPulang: waktuPulang ?? this.waktuPulang,
-      suratUrl: suratUrl ?? this.suratUrl,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
